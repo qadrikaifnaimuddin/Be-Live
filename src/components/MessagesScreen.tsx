@@ -383,7 +383,7 @@ export default function MessagesScreen({
       // 1. Check if direct room already exists (fetch user's direct rooms and filter in JS for absolute reliability)
       const { data: existing, error: findError } = await supabase
         .from('chat_rooms')
-        .select('id, name, type, avatar, members, last_message, last_message_time, created_by, admin_ids, allow_anonymous, description, created_at')
+        .select('id, name, type, avatar, members, last_message, last_message_time, creator_id, admin_ids, allow_anonymous, description, created_at')
         .eq('type', 'direct')
         .contains('members', [currentUser.id]);
 
@@ -479,7 +479,7 @@ export default function MessagesScreen({
     try {
       const { data, error } = await supabase
         .from('chat_rooms')
-        .select('id, name, type, avatar, members, last_message, last_message_time, created_by, admin_ids, allow_anonymous, description, created_at')
+        .select('id, name, type, avatar, members, last_message, last_message_time, creator_id, admin_ids, allow_anonymous, description, created_at')
         .contains('members', [currentUser.id])
         .order('last_message_time', { ascending: false, nullsFirst: false })
         .limit(50);
