@@ -53,7 +53,7 @@ export interface Message {
   text?: string;
   encryptedText?: string; // Ciphertext representation for E2EE display
   mediaUrl?: string;
-  mediaType?: 'image' | 'video' | 'snap' | 'audio' | 'location' | 'poll' | 'payment'; // 'snap' is view-once, 'audio' is recorded voice, 'location' is shared gps, 'poll' is dynamic interactive poll, 'payment' is simulated digital cash
+  mediaType?: 'image' | 'video' | 'snap' | 'audio' | 'location' | 'poll' | 'payment' | 'call'; // 'snap' is view-once, 'audio' is recorded voice, 'location' is shared gps, 'poll' is dynamic interactive poll, 'payment' is simulated digital cash, 'call' is voice/video call log
   snapViewed?: boolean; // True once opened and closed
   isE2EE: boolean;
   createdAt: string;

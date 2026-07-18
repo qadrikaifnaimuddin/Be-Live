@@ -338,6 +338,7 @@ export default function MessagesScreen({
   const dragStartXRef = useRef<number>(0);
   const holdTimerRef = useRef<any>(null);
   const chatDeleteHoldTimerRef = useRef<any>(null);
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState<boolean>(false);
 
   // ── Poll ──
   const [showPollBuilder, setShowPollBuilder] = useState(false);
@@ -400,7 +401,7 @@ export default function MessagesScreen({
       // 1. Check if direct room already exists (fetch user's direct rooms and filter in JS for absolute reliability)
       const { data: existing, error: findError } = await supabase
         .from('chat_rooms')
-        .select('id, name, type, avatar, members, last_message, last_message_time, creator_id, admin_ids, allow_anonymous, description, created_at')
+        .select('id, name, type, avatar, members, last_message, last_message_time, creator_id, admin_ids, allow_anonymous, description, created_at, deleted_by')
         .eq('type', 'direct')
         .contains('members', [currentUser.id]);
 
@@ -408,6 +409,10 @@ export default function MessagesScreen({
       
       const foundRoom = existing?.find(r => r.members && r.members.includes(targetUserId));
       if (foundRoom) {
+        if (foundRoom.deleted_by && foundRoom.deleted_by.includes(currentUser.id)) {
+          const updatedDeletedBy = foundRoom.deleted_by.filter((id: string) => id !== currentUser.id);
+          await supabase.from('chat_rooms').update({ deleted_by: updatedDeletedBy }).eq('id', foundRoom.id);
+        }
         return dbRowToRoom(foundRoom);
       }
 
@@ -451,6 +456,19 @@ export default function MessagesScreen({
       console.error('[Messages] ensureDirectRoom error:', err);
     }
     return null;
+  };
+
+  const selectChatRoom = async (room: ChatRoom) => {
+    if (room.id.startsWith('dm-legacy-')) {
+      const otherId = room.id.replace('dm-legacy-', '');
+      const realRoom = await ensureDirectRoom(otherId);
+      if (realRoom) {
+        setSelectedChat(realRoom);
+        loadRooms();
+      }
+    } else {
+      setSelectedChat(room);
+    }
   };
 
   const formatTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -532,6 +550,85 @@ export default function MessagesScreen({
           });
         }
       }
+
+      // Fetch legacy messages where room_id is null and user is involved
+      const { data: legacyMessages } = await supabase
+        .from('messages')
+        .select('id, text, created_at, sender_id, receiver_id, media_type, is_sticker, is_doodle, deleted_by')
+        .is('room_id', null)
+        .or(`sender_id.eq.${currentUser.id},receiver_id.eq.${currentUser.id}`)
+        .order('created_at', { ascending: false });
+
+      const legacyGroups: Record<string, { text: string; time: string; count: number; deletedBy: string[] }> = {};
+      if (legacyMessages) {
+        legacyMessages.forEach(msg => {
+          const otherId = msg.sender_id === currentUser.id ? msg.receiver_id : msg.sender_id;
+          if (!otherId) return;
+          if (!legacyGroups[otherId]) {
+            let displayText = msg.text || '';
+            if (msg.media_type === 'audio') displayText = '🎤 Voice message';
+            else if (msg.media_type === 'snap') displayText = '📸 Snap';
+            else if (msg.is_sticker) displayText = '✨ Sticker';
+            else if (msg.is_doodle) displayText = '🎨 Doodle';
+            else if (msg.media_type === 'location') displayText = '📍 Location';
+            else if (msg.media_type === 'call') displayText = '📞 Call log';
+            
+            legacyGroups[otherId] = {
+              text: displayText,
+              time: msg.created_at,
+              count: 1,
+              deletedBy: msg.deleted_by || []
+            };
+          }
+        });
+      }
+
+      const existingDirectUserIds = new Set(
+        parsedRooms
+          .filter(r => r.type === 'direct')
+          .map(r => r.members.find(m => m !== currentUser.id))
+          .filter(Boolean)
+      );
+
+      const missingUserIds = Object.keys(legacyGroups).filter(uid => !existingDirectUserIds.has(uid));
+      if (missingUserIds.length > 0) {
+        const { data: missingProfiles } = await supabase
+          .from('profiles')
+          .select('id, name, username, avatar, last_seen')
+          .in('id', missingUserIds);
+          
+        if (missingProfiles) {
+          missingProfiles.forEach(prof => {
+            const leg = legacyGroups[prof.id];
+            // Only add if user has not soft-deleted this virtual room/messages
+            if (!leg.deletedBy.includes(currentUser.id)) {
+              parsedRooms.push({
+                id: `dm-legacy-${prof.id}`,
+                name: prof.name || `@${prof.username}`,
+                description: `@${prof.username}`,
+                type: 'direct',
+                avatar: prof.avatar || `https://api.dicebear.com/7.x/adventurer/svg?seed=${prof.username}`,
+                creatorId: currentUser.id,
+                members: [currentUser.id, prof.id],
+                adminIds: [],
+                allowAnonymous: false,
+                lastMessage: leg.text,
+                lastMessageTime: leg.time,
+                createdAt: leg.time,
+                deletedBy: leg.deletedBy,
+                lastSeen: prof.last_seen
+              });
+            }
+          });
+        }
+      }
+
+      // Sort combined rooms by lastMessageTime descending
+      parsedRooms.sort((a, b) => {
+        const tA = a.lastMessageTime ? new Date(a.lastMessageTime).getTime() : 0;
+        const tB = b.lastMessageTime ? new Date(b.lastMessageTime).getTime() : 0;
+        return tB - tA;
+      });
 
       const activeRooms = parsedRooms.filter(r => !r.deletedBy || !r.deletedBy.includes(currentUser.id));
       setRooms(activeRooms);
@@ -814,13 +911,11 @@ export default function MessagesScreen({
     setDragX(0);
   };
 
-  const startMessageHold = (msgId: string, isMyMsg: boolean) => {
+  const startMessageHold = (msgId: string) => {
     if (isSelectionMode) return;
     holdTimerRef.current = setTimeout(() => {
-      if (isMyMsg) {
-        setIsSelectionMode(true);
-        setSelectedMessageIds([msgId]);
-      }
+      setIsSelectionMode(true);
+      setSelectedMessageIds([msgId]);
     }, 800);
   };
 
@@ -897,20 +992,48 @@ export default function MessagesScreen({
     }
   };
 
-  const unsendSelectedMessages = async () => {
+  const deleteSelectedForEveryone = async () => {
     if (!isSupabaseConfigured || !supabase || selectedMessageIds.length === 0) return;
-    const ok = window.confirm(`Are you sure you want to unsend these ${selectedMessageIds.length} messages? They will be deleted for everyone.`);
-    if (!ok) return;
     try {
-      const { error } = await supabase.from('messages').delete().in('id', selectedMessageIds);
+      const ownMessageIds = selectedMessageIds.filter(id => {
+        const msg = messages.find(m => m.id === id);
+        return msg && msg.senderId === currentUser.id;
+      });
+      if (ownMessageIds.length === 0) return;
+
+      const { error } = await supabase.from('messages').delete().in('id', ownMessageIds);
       if (error) throw error;
+      setMessages(prev => prev.filter(m => !ownMessageIds.includes(m.id)));
+      setIsSelectionMode(false);
+      setSelectedMessageIds([]);
+      setShowDeleteConfirmation(false);
+    } catch (err) {
+      console.error('Failed to delete for everyone:', err);
+      alert('Failed to delete for everyone.');
+    }
+  };
+
+  const deleteSelectedForMe = async () => {
+    if (!isSupabaseConfigured || !supabase || selectedMessageIds.length === 0) return;
+    try {
+      const selectedMsgs = messages.filter(m => selectedMessageIds.includes(m.id));
+      for (const msg of selectedMsgs) {
+        const updatedDeletedBy = msg.deletedBy ? [...msg.deletedBy, currentUser.id] : [currentUser.id];
+        await supabase.from('messages').update({ deleted_by: updatedDeletedBy }).eq('id', msg.id);
+      }
       setMessages(prev => prev.filter(m => !selectedMessageIds.includes(m.id)));
       setIsSelectionMode(false);
       setSelectedMessageIds([]);
+      setShowDeleteConfirmation(false);
     } catch (err) {
-      console.error('Failed to unsend messages:', err);
-      alert('Failed to unsend messages.');
+      console.error('Failed to delete for me:', err);
+      alert('Failed to delete for me.');
     }
+  };
+
+  const unsendSelectedMessages = async () => {
+    if (selectedMessageIds.length === 0) return;
+    setShowDeleteConfirmation(true);
   };
 
   useEffect(() => {
@@ -1703,7 +1826,7 @@ export default function MessagesScreen({
                     key={room.id}
                     onClick={() => {
                       if (!chatDeleteHoldTimerRef.current) {
-                        setSelectedChat(room);
+                        selectChatRoom(room);
                       }
                     }}
                     onMouseDown={() => startChatDeleteHold(room.id)}
@@ -1967,7 +2090,7 @@ export default function MessagesScreen({
                       {msg.isForwarded && <p className="text-[10px] text-stone-600 mb-1 px-1 flex items-center gap-1"><Share2 className="w-2.5 h-2.5" />Forwarded</p>}
                       <div
                         onMouseDown={(e) => {
-                          startMessageHold(msg.id, me);
+                          startMessageHold(msg.id);
                           handleDragStart(e, msg.id);
                         }}
                         onMouseMove={handleDragMove}
@@ -1981,7 +2104,7 @@ export default function MessagesScreen({
                           setDragX(0);
                         }}
                         onTouchStart={(e) => {
-                          startMessageHold(msg.id, me);
+                          startMessageHold(msg.id);
                           handleDragStart(e, msg.id);
                         }}
                         onTouchMove={handleDragMove}
@@ -1992,13 +2115,11 @@ export default function MessagesScreen({
                         onClick={(e) => {
                           if (isSelectionMode) {
                             e.stopPropagation();
-                            if (me) {
-                              setSelectedMessageIds(prev =>
-                                prev.includes(msg.id)
-                                  ? prev.filter(id => id !== msg.id)
-                                  : [...prev, msg.id]
-                              );
-                            }
+                            setSelectedMessageIds(prev =>
+                              prev.includes(msg.id)
+                                ? prev.filter(id => id !== msg.id)
+                                : [...prev, msg.id]
+                            );
                           } else {
                             setSelectedTimestampMessageId(selectedTimestampMessageId === msg.id ? null : msg.id);
                           }
@@ -2043,15 +2164,21 @@ export default function MessagesScreen({
                         {msg.mediaType === 'location' && (
                           <div className="flex items-center gap-2 text-sm"><Navigation className="w-4 h-4 text-green-400" /><span>Live Location ({msg.liveLocationDuration}m)</span></div>
                         )}
+                        {msg.mediaType === 'call' && (
+                          <div className="flex items-center gap-2 text-sm font-semibold py-1">
+                            {msg.text.includes('Video') ? <Video className="w-4 h-4 text-blue-400 shrink-0" /> : <Phone className="w-4 h-4 text-emerald-400 shrink-0" />}
+                            <span className="leading-relaxed">{msg.text}</span>
+                          </div>
+                        )}
                         {msg.isSticker && msg.text && <span className="text-4xl">{msg.text}</span>}
-                        {msg.text && !msg.isSticker && (
+                        {msg.text && !msg.isSticker && msg.mediaType !== 'call' && (
                           <p className="text-sm leading-relaxed break-words">{renderFormattedText(msg.text, activeChatSearchQuery)}</p>
                         )}
                         {msg.isDisappearing && countdown !== undefined && countdown > 0 && (
                           <p className="text-[10px] opacity-60 mt-0.5 flex items-center gap-1"><Clock className="w-2.5 h-2.5" />{Math.ceil(countdown)}s</p>
                         )}
                         <div className="flex items-center justify-end gap-1 mt-0.5 min-h-[14px]">
-                          {me && (
+                          {me && msg.mediaType !== 'call' && (
                             msg.isRead ? (
                               <CheckCheck className="w-3.5 h-3.5 text-sky-400" />
                             ) : msg.isDelivered ? (
@@ -2066,10 +2193,10 @@ export default function MessagesScreen({
                       {selectedTimestampMessageId === msg.id && (
                         <div className="text-[10px] text-stone-500 mt-1 flex flex-col gap-0.5 bg-stone-900/80 border border-stone-800 rounded-xl px-2.5 py-1.5 min-w-[140px] shadow-lg animate-fadeIn z-10">
                           <p className="flex justify-between gap-4"><span>Sent:</span> <span className="font-semibold text-stone-300">{formatFullTime(msg.createdAt)}</span></p>
-                          {me && msg.deliveredAt && (
-                            <p className="flex justify-between gap-4"><span>Delivered:</span> <span className="font-semibold text-stone-300">{formatFullTime(msg.deliveredAt)}</span></p>
+                          {msg.deliveredAt && (
+                            <p className="flex justify-between gap-4"><span>{me ? 'Delivered:' : 'Received:'}</span> <span className="font-semibold text-stone-300">{formatFullTime(msg.deliveredAt)}</span></p>
                           )}
-                          {me && msg.readAt && (
+                          {msg.readAt && (
                             <p className="flex justify-between gap-4"><span>Seen:</span> <span className="font-semibold text-sky-400">{formatFullTime(msg.readAt)}</span></p>
                           )}
                         </div>
@@ -2303,6 +2430,46 @@ export default function MessagesScreen({
             <input value={newChannelName} onChange={e => setNewChannelName(e.target.value)} placeholder="Channel name..." className="w-full bg-stone-800 border border-stone-700 rounded-xl px-4 py-2.5 text-sm text-stone-200 placeholder-stone-600 focus:outline-none focus:border-amber-500 mb-3" />
             <input value={newChannelDescription} onChange={e => setNewChannelDescription(e.target.value)} placeholder="Description..." className="w-full bg-stone-800 border border-stone-700 rounded-xl px-4 py-2.5 text-sm text-stone-200 placeholder-stone-600 focus:outline-none focus:border-amber-500 mb-4" />
             <button onClick={createChannel} disabled={!newChannelName.trim()} className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-xl font-bold text-sm cursor-pointer transition-all">Create Channel</button>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation modal (WhatsApp Style) */}
+      {showDeleteConfirmation && (
+        <div className="fixed inset-0 z-50 bg-black/75 flex items-center justify-center p-4 backdrop-blur-sm animate-fadeIn" onClick={() => setShowDeleteConfirmation(false)}>
+          <div className="bg-stone-900 border border-stone-800 rounded-3xl p-6 w-full max-w-sm shadow-2xl animate-scaleIn" onClick={e => e.stopPropagation()}>
+            <h3 className="font-bold text-stone-200 text-lg mb-3 flex items-center gap-2">
+              <Trash2 className="w-5 h-5 text-rose-500" />
+              Delete {selectedMessageIds.length} {selectedMessageIds.length === 1 ? 'Message' : 'Messages'}?
+            </h3>
+            <p className="text-xs text-stone-400 mb-6 leading-relaxed">
+              Choose whether you want to delete these messages for yourself or everyone.
+            </p>
+            <div className="flex flex-col gap-2">
+              {selectedMessageIds.every(id => {
+                const msg = messages.find(m => m.id === id);
+                return msg && msg.senderId === currentUser.id;
+              }) && (
+                <button
+                  onClick={deleteSelectedForEveryone}
+                  className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold text-sm cursor-pointer transition-all flex items-center justify-center gap-2"
+                >
+                  Delete for Everyone
+                </button>
+              )}
+              <button
+                onClick={deleteSelectedForMe}
+                className="w-full py-2.5 bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-xl font-bold text-sm cursor-pointer transition-all flex items-center justify-center gap-2"
+              >
+                Delete for Me
+              </button>
+              <button
+                onClick={() => setShowDeleteConfirmation(false)}
+                className="w-full py-2.5 border border-stone-800 text-stone-400 hover:text-stone-300 rounded-xl font-bold text-sm cursor-pointer transition-all"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

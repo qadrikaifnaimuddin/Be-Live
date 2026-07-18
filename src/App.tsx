@@ -22,6 +22,108 @@ export default function App() {
   const [activeChatUserId, setActiveChatUserId] = useState<string | undefined>(undefined);
   const [isChatActive, setIsChatActive] = useState(false);
 
+  const handleCallStart = async (info: { remoteUserId: string; callType: 'audio' | 'video' }) => {
+    if (!currentUser || !isSupabaseConfigured || !supabase) return;
+    try {
+      // Find or create direct room
+      const { data: rooms } = await supabase
+        .from('chat_rooms')
+        .select('id, name, type, avatar, members, last_message, last_message_time, creator_id, admin_ids, allow_anonymous, description, created_at')
+        .eq('type', 'direct')
+        .contains('members', [currentUser.id]);
+
+      let roomId: string | null = null;
+      const foundRoom = rooms?.find(r => r.members && r.members.includes(info.remoteUserId));
+      if (foundRoom) {
+        roomId = foundRoom.id;
+      } else {
+        const { data: otherProfile } = await supabase
+          .from('profiles')
+          .select('username, name, avatar')
+          .eq('id', info.remoteUserId)
+          .maybeSingle();
+
+        const otherName = otherProfile ? (otherProfile.name || `@${otherProfile.username}`) : 'Direct Message';
+        const otherAvatar = otherProfile?.avatar || '';
+        const { data: newRoom } = await supabase
+          .from('chat_rooms')
+          .insert({
+            name: otherName,
+            type: 'direct',
+            avatar: otherAvatar,
+            creator_id: currentUser.id,
+            members: [currentUser.id, info.remoteUserId],
+            admin_ids: [currentUser.id, info.remoteUserId],
+            allow_anonymous: false,
+            description: `@${otherProfile?.username || ''}`
+          })
+          .select()
+          .single();
+        if (newRoom) roomId = newRoom.id;
+      }
+
+      const callIcon = info.callType === 'video' ? '📹' : '📞';
+      const label = info.callType === 'video' ? 'Video Call' : 'Voice Call';
+      await supabase.from('messages').insert({
+        sender_id: currentUser.id,
+        receiver_id: info.remoteUserId,
+        room_id: roomId,
+        text: `${callIcon} ${label} Started`,
+        media_type: 'call',
+        is_read: true,
+        is_delivered: true
+      });
+    } catch (e) {
+      console.error('Failed to log call start:', e);
+    }
+  };
+
+  const handleCallEnd = async (record: any) => {
+    if (!currentUser || !isSupabaseConfigured || !supabase) return;
+    try {
+      // 1. Log to call_history
+      await supabase.from('call_history').insert({
+        caller_id: record.status === 'outgoing' || record.status === 'completed' || record.status === 'declined' ? currentUser.id : record.remoteUserId,
+        receiver_id: record.status === 'outgoing' || record.status === 'completed' || record.status === 'declined' ? record.remoteUserId : currentUser.id,
+        call_type: record.callType,
+        status: record.status,
+        duration: record.duration,
+      });
+
+      // 2. Find room ID
+      const { data: rooms } = await supabase
+        .from('chat_rooms')
+        .select('id, name, type, avatar, members, last_message, last_message_time, creator_id, admin_ids, allow_anonymous, description, created_at')
+        .eq('type', 'direct')
+        .contains('members', [currentUser.id]);
+
+      const foundRoom = rooms?.find(r => r.members && r.members.includes(record.remoteUserId));
+      if (foundRoom) {
+        const callIcon = record.callType === 'video' ? '📹' : '📞';
+        const label = record.callType === 'video' ? 'Video Call' : 'Voice Call';
+        const durationText = record.duration > 0
+          ? `${Math.floor(record.duration / 60)}m ${record.duration % 60}s`
+          : '';
+        const endStatus = record.status === 'missed' ? 'Missed' : record.status === 'declined' ? 'Declined' : 'Ended';
+        
+        let text = `${callIcon} ${label} ${endStatus}`;
+        if (durationText) text += ` - Duration: ${durationText}`;
+
+        await supabase.from('messages').insert({
+          sender_id: currentUser.id,
+          receiver_id: record.remoteUserId,
+          room_id: foundRoom.id,
+          text,
+          media_type: 'call',
+          is_read: true,
+          is_delivered: true
+        });
+      }
+    } catch (e) {
+      console.error('Failed to log call end:', e);
+    }
+  };
+
   // Follow system — Supabase-backed, Realtime
   const followSystem = useFollowSystem(currentUser?.id ?? null);
 
@@ -31,7 +133,7 @@ export default function App() {
     name: currentUser.name,
     username: currentUser.username,
     avatar: currentUser.avatar,
-  } : null);
+  } : null, handleCallEnd, handleCallStart);
 
   // Build a RemoteUser object from a User for outgoing calls
   const makeRemoteUser = (u: User): RemoteUser => ({

@@ -87,7 +87,8 @@ export interface CallEndedRecord {
 // ── Hook ──────────────────────────────────────────────────────────
 export function useWebRTC(
   currentUser: CallerInfo | null,
-  onCallEnd?: (record: CallEndedRecord) => void
+  onCallEnd?: (record: CallEndedRecord) => void,
+  onCallStart?: (info: { remoteUserId: string; callType: 'audio' | 'video' }) => void
 ) {
   const currentUserId = currentUser?.id ?? null;
   // State
@@ -307,6 +308,10 @@ export function useWebRTC(
           callDuration: 0,
           error: null,
         });
+
+        if (onCallStart) {
+          onCallStart({ remoteUserId: targetUser.id, callType: type });
+        }
 
         // Subscribe to signaling channel
         subscribeToChannel(targetUser.id, async (payload) => {
