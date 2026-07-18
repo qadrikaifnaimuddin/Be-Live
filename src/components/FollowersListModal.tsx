@@ -5,6 +5,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { X, UserPlus, UserCheck, Loader2, Users } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 
@@ -28,6 +29,7 @@ interface FollowersListModalProps {
 export default function FollowersListModal({
   userId, mode, currentUserId, isFollowing, onFollow, onUnfollow, onClose
 }: FollowersListModalProps) {
+  const navigate = useNavigate();
   const [users, setUsers] = useState<ListUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -92,21 +94,16 @@ export default function FollowersListModal({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
 
       <div
-        className="relative w-full max-w-lg bg-stone-950 border border-stone-800 rounded-t-3xl overflow-hidden flex flex-col"
-        style={{ maxHeight: '85vh', animation: 'slideUp 0.25s cubic-bezier(0.16,1,0.3,1)' }}
+        className="relative w-full max-w-md bg-stone-950 border border-stone-800 rounded-3xl overflow-hidden flex flex-col shadow-2xl"
+        style={{ maxHeight: '80vh', animation: 'scaleIn 0.2s cubic-bezier(0.16,1,0.3,1)' }}
         onClick={e => e.stopPropagation()}
       >
-        {/* Handle */}
-        <div className="flex justify-center pt-3 pb-1 shrink-0">
-          <div className="w-10 h-1 rounded-full bg-stone-700" />
-        </div>
-
         {/* Header */}
-        <div className="flex items-center justify-between px-5 pb-3 pt-1 border-b border-stone-800 shrink-0">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-stone-800 shrink-0">
           <h3 className="text-base font-black text-stone-100 capitalize">{mode}</h3>
           <button onClick={onClose} className="p-2 rounded-xl text-stone-500 hover:text-stone-200 hover:bg-stone-900 transition-all cursor-pointer">
             <X className="w-5 h-5" />
@@ -145,7 +142,14 @@ export default function FollowersListModal({
             const following = isFollowing(user.id);
             const isLoading = loadingIds.has(user.id);
             return (
-              <div key={user.id} className="flex items-center gap-3 px-4 py-3 hover:bg-stone-900/40 transition-all">
+              <div
+                key={user.id}
+                className="flex items-center gap-3 px-4 py-3 hover:bg-stone-900/40 transition-all cursor-pointer"
+                onClick={() => {
+                  onClose();
+                  navigate('/' + user.username);
+                }}
+              >
                 {/* Avatar */}
                 <img
                   src={user.avatar || `https://api.dicebear.com/7.x/adventurer/svg?seed=${user.username}`}
@@ -161,7 +165,7 @@ export default function FollowersListModal({
                 {/* Follow button */}
                 {!isSelf && (
                   <button
-                    onClick={() => handleToggleFollow(user)}
+                    onClick={(e) => { e.stopPropagation(); handleToggleFollow(user); }}
                     disabled={isLoading}
                     className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer disabled:opacity-60 flex items-center gap-1.5 shrink-0 ${
                       following
@@ -184,9 +188,9 @@ export default function FollowersListModal({
       </div>
 
       <style>{`
-        @keyframes slideUp {
-          from { transform: translateY(100%); opacity: 0; }
-          to { transform: translateY(0); opacity: 1; }
+        @keyframes scaleIn {
+          from { transform: scale(0.95); opacity: 0; }
+          to { transform: scale(1); opacity: 1; }
         }
       `}</style>
     </div>

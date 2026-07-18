@@ -380,17 +380,16 @@ export default function MessagesScreen({
   const ensureDirectRoom = async (targetUserId: string): Promise<ChatRoom | null> => {
     if (!isSupabaseConfigured || !supabase || !currentUser?.id) return null;
     try {
-      // 1. Check if direct room already exists
+      // 1. Check if direct room already exists (fetch user's direct rooms and filter in JS for absolute reliability)
       const { data: existing, error: findError } = await supabase
         .from('chat_rooms')
         .select('id, name, type, avatar, members, last_message, last_message_time, created_by, admin_ids, allow_anonymous, description, created_at')
         .eq('type', 'direct')
-        .contains('members', [currentUser.id, targetUserId])
-        .limit(1);
+        .contains('members', [currentUser.id]);
 
       if (findError) throw findError;
       
-      const foundRoom = existing?.[0];
+      const foundRoom = existing?.find(r => r.members && r.members.includes(targetUserId));
       if (foundRoom) {
         return dbRowToRoom(foundRoom);
       }
@@ -682,8 +681,8 @@ export default function MessagesScreen({
       if (room) {
         setSelectedChat(room);
       }
+      onClearActiveChatUser?.();
     });
-    onClearActiveChatUser?.();
   }, [activeChatUserId, onClearActiveChatUser]);
 
   // ─────────────────────────────────────────────
