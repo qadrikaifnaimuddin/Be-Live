@@ -311,6 +311,7 @@ export default function App() {
 
   // Navigate to messages and open a specific DM
   const handleOpenDM = (userId: string) => {
+    localStorage.setItem('be_live_active_dm_target', userId);
     setActiveChatUserId(userId);
     setActiveTab('messages');
   };
@@ -366,10 +367,7 @@ export default function App() {
                 hasPendingRequest={followSystem.hasPendingRequest}
                 onFollow={followSystem.follow}
                 onUnfollow={followSystem.unfollow}
-                onOpenDM={(userId) => {
-                  setActiveChatUserId(userId);
-                  setActiveTab('messages');
-                }}
+                onOpenDM={handleOpenDM}
                 onClose={() => setActiveTab('profile')}
               />
             )}

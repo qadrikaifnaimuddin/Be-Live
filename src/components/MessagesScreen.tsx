@@ -676,8 +676,10 @@ export default function MessagesScreen({
   // External activeChatUserId
   // ─────────────────────────────────────────────
   useEffect(() => {
-    if (!activeChatUserId || !isSupabaseConfigured || !supabase) return;
-    ensureDirectRoom(activeChatUserId).then(room => {
+    const targetId = activeChatUserId || localStorage.getItem('be_live_active_dm_target');
+    if (!targetId || !isSupabaseConfigured || !supabase) return;
+    localStorage.removeItem('be_live_active_dm_target');
+    ensureDirectRoom(targetId).then(room => {
       if (room) {
         setSelectedChat(room);
       }
