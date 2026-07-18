@@ -803,6 +803,45 @@ export default function ProfileScreen({
   // Profile sharing states
   const [isSharingProfile, setIsSharingProfile] = useState(false);
   const [shareSuccess, setShareSuccess] = useState<string | null>(null);
+
+  // Dynamic Follow Counts from DB
+  const [dbFollowersCount, setDbFollowersCount] = useState(0);
+  const [dbFollowingCount, setDbFollowingCount] = useState(0);
+
+  React.useEffect(() => {
+    if (!isSupabaseConfigured || !supabase || !user?.id) return;
+
+    const fetchFollowStats = async () => {
+      const { data } = await supabase
+        .from('profile_follow_stats')
+        .select('followers_count, following_count')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (data) {
+        setDbFollowersCount(data.followers_count ?? 0);
+        setDbFollowingCount(data.following_count ?? 0);
+      }
+    };
+
+    fetchFollowStats();
+
+    // Subscribe to realtime changes on relationships to reload stats dynamically
+    const channel = supabase
+      .channel(`profile-follow-stats-${user.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'relationships',
+      }, () => {
+        fetchFollowStats();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user.id]);
+
   // Chat rooms available for profile sharing — fetched from DB when modal opens
   const [shareChatRooms, setShareChatRooms] = useState<any[]>([]);
   React.useEffect(() => {
@@ -1903,7 +1942,7 @@ export default function ProfileScreen({
                 title="View followers"
               >
                 <span className="font-extrabold text-stone-100">
-                  {isOwnProfile ? currentUser.followers.length : user.followers.length}
+                  {dbFollowersCount}
                 </span>
                 <span className="text-stone-400 text-xs font-medium">followers</span>
               </button>
@@ -1917,7 +1956,7 @@ export default function ProfileScreen({
                 title="View following"
               >
                 <span className="font-extrabold text-stone-100">
-                  {isOwnProfile ? currentUser.following.length : user.following.length}
+                  {dbFollowingCount}
                 </span>
                 <span className="text-stone-400 text-xs font-medium">following</span>
               </button>

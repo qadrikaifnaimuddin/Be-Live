@@ -16,6 +16,7 @@ import {
   Clock, TrendingUp, Users, ArrowLeft, Loader2,
   BadgeCheck, Lock, ChevronRight
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 import { User } from '../types';
 
@@ -318,6 +319,7 @@ export default function SearchScreen({
   onOpenDM,
   onClose,
 }: SearchScreenProps) {
+  const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchUser[]>([]);
   const [suggested, setSuggested] = useState<SearchUser[]>([]);
@@ -445,7 +447,7 @@ export default function SearchScreen({
   const handleViewProfile = (user: SearchUser) => {
     saveRecent(user.username);
     setRecentSearches(getRecent());
-    setSelectedUser(user);
+    navigate('/' + user.username);
   };
 
   const handleClearQuery = () => {

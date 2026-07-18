@@ -358,6 +358,85 @@ export default function MessagesScreen({
     ? ((selectedChat as ChatRoom).type !== 'channel' || (selectedChat as ChatRoom).adminIds.includes(currentUser.id))
     : true;
 
+  const isDirect = selectedChat && (!('type' in selectedChat) || (selectedChat as ChatRoom).type === 'direct');
+
+  const getDirectTargetUser = (): User | null => {
+    if (!selectedChat) return null;
+    if (!('type' in selectedChat)) return selectedChat;
+    if (selectedChat.type !== 'direct') return null;
+    const otherId = selectedChat.members.find(m => m !== currentUser.id) || selectedChat.creatorId;
+    return {
+      id: otherId,
+      name: selectedChat.name,
+      username: selectedChat.description ? selectedChat.description.replace('@', '') : '',
+      avatar: selectedChat.avatar,
+      bio: '',
+      email: '',
+      followers: [],
+      following: []
+    };
+  };
+
+  const ensureDirectRoom = async (targetUserId: string): Promise<ChatRoom | null> => {
+    if (!isSupabaseConfigured || !supabase || !currentUser?.id) return null;
+    try {
+      // 1. Check if direct room already exists
+      const { data: existing, error: findError } = await supabase
+        .from('chat_rooms')
+        .select('id, name, type, avatar, members, last_message, last_message_time, created_by, admin_ids, allow_anonymous, description, created_at')
+        .eq('type', 'direct')
+        .contains('members', [currentUser.id, targetUserId])
+        .limit(1);
+
+      if (findError) throw findError;
+      
+      const foundRoom = existing?.[0];
+      if (foundRoom) {
+        return dbRowToRoom(foundRoom);
+      }
+
+      // 2. Fetch other user's profile to get name and avatar for room creation
+      const { data: otherProfile } = await supabase
+        .from('profiles')
+        .select('username, name, avatar')
+        .eq('id', targetUserId)
+        .maybeSingle();
+
+      const otherName = otherProfile ? (otherProfile.name || `@${otherProfile.username}`) : 'Direct Message';
+      const otherAvatar = otherProfile?.avatar || '';
+
+      // 3. Create the direct room
+      const { data: newRoomData, error: createError } = await supabase
+        .from('chat_rooms')
+        .insert({
+          name: otherName,
+          type: 'direct',
+          avatar: otherAvatar,
+          creator_id: currentUser.id,
+          members: [currentUser.id, targetUserId],
+          admin_ids: [currentUser.id, targetUserId],
+          allow_anonymous: false,
+          description: `@${otherProfile?.username || ''}`
+        })
+        .select()
+        .single();
+
+      if (createError) throw createError;
+      if (newRoomData) {
+        const newRoom = dbRowToRoom(newRoomData);
+        // Add to local rooms state so it shows up in sidebar immediately
+        setRooms(prev => {
+          if (prev.some(r => r.id === newRoom.id)) return prev;
+          return [newRoom, ...prev];
+        });
+        return newRoom;
+      }
+    } catch (err) {
+      console.error('[Messages] ensureDirectRoom error:', err);
+    }
+    return null;
+  };
+
   const formatTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const formatDur = (s: number) => `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
   const getStreak = (partnerId: string) => streaks.find(s => s.partnerId === partnerId);
@@ -401,18 +480,76 @@ export default function MessagesScreen({
     try {
       const { data, error } = await supabase
         .from('chat_rooms')
-        .select('id, name, type, avatar, members, last_message, last_message_time, created_by')
+        .select('id, name, type, avatar, members, last_message, last_message_time, created_by, admin_ids, allow_anonymous, description, created_at')
         .contains('members', [currentUser.id])
         .order('last_message_time', { ascending: false, nullsFirst: false })
         .limit(50);
       if (error) throw error;
-      setRooms((data || []).map(dbRowToRoom));
+      
+      const parsedRooms = (data || []).map(dbRowToRoom);
+
+      // Fetch profiles for other members in direct rooms to show correct name and avatar dynamically
+      const directRooms = parsedRooms.filter(r => r.type === 'direct');
+      const otherUserIds = directRooms
+        .map(r => r.members.find(m => m !== currentUser.id))
+        .filter(Boolean) as string[];
+
+      if (otherUserIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, name, username, avatar')
+          .in('id', otherUserIds);
+
+        if (profiles) {
+          const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
+          parsedRooms.forEach(r => {
+            if (r.type === 'direct') {
+              const otherId = r.members.find(m => m !== currentUser.id);
+              const prof = otherId ? profileMap[otherId] : null;
+              if (prof) {
+                r.name = prof.name || `@${prof.username}`;
+                r.avatar = prof.avatar || `https://api.dicebear.com/7.x/adventurer/svg?seed=${prof.username}`;
+                r.description = `@${prof.username}`;
+              }
+            }
+          });
+        }
+      }
+
+      setRooms(parsedRooms);
     } catch (err) {
       console.error('[Messages] loadRooms:', err);
     }
   }, [currentUser.id]);
 
   useEffect(() => { loadRooms(); }, [loadRooms]);
+
+  // Global Realtime listener to update the room list in real-time
+  useEffect(() => {
+    if (!currentUser?.id || !isSupabaseConfigured || !supabase) return;
+    const globalChannel = supabase
+      .channel(`global-chat-${currentUser.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'chat_rooms',
+      }, () => {
+        loadRooms();
+      })
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `receiver_id=eq.${currentUser.id}`,
+      }, () => {
+        loadRooms();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(globalChannel);
+    };
+  }, [currentUser.id, loadRooms]);
 
   // ─────────────────────────────────────────────
   // Load messages
@@ -430,7 +567,16 @@ export default function MessagesScreen({
         .limit(100);
 
       if (chatIsRoom) {
-        query = query.eq('room_id', selectedChat.id);
+        if (selectedChat.type === 'direct') {
+          const otherId = selectedChat.members.find(m => m !== currentUser.id) || selectedChat.creatorId;
+          query = query.or(
+            `room_id.eq.${selectedChat.id},` +
+            `and(sender_id.eq.${currentUser.id},receiver_id.eq.${otherId}),` +
+            `and(sender_id.eq.${otherId},receiver_id.eq.${currentUser.id})`
+          );
+        } else {
+          query = query.eq('room_id', selectedChat.id);
+        }
       } else {
         query = query.or(
           `and(sender_id.eq.${currentUser.id},receiver_id.eq.${selectedChat.id}),` +
@@ -532,21 +678,11 @@ export default function MessagesScreen({
   // ─────────────────────────────────────────────
   useEffect(() => {
     if (!activeChatUserId || !isSupabaseConfigured || !supabase) return;
-    supabase
-      .from('profiles')
-      .select('id, username, email, name, bio, avatar, color, is_private, is_anonymous_mode')
-      .eq('id', activeChatUserId)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (data) {
-          const u: User = {
-            id: data.id, username: data.username, email: data.email || '',
-            name: data.name || '', bio: data.bio || '', avatar: data.avatar || '',
-            followers: [], following: [],
-          };
-          setSelectedChat(u);
-        }
-      });
+    ensureDirectRoom(activeChatUserId).then(room => {
+      if (room) {
+        setSelectedChat(room);
+      }
+    });
     onClearActiveChatUser?.();
   }, [activeChatUserId, onClearActiveChatUser]);
 
@@ -708,6 +844,10 @@ export default function MessagesScreen({
 
     if (chatIsRoom) {
       payload.room_id = selectedChat.id;
+      if (selectedChat.type === 'direct') {
+        const otherId = selectedChat.members.find(m => m !== currentUser.id) || selectedChat.creatorId;
+        payload.receiver_id = otherId;
+      }
     } else {
       payload.receiver_id = selectedChat.id;
     }
@@ -731,7 +871,10 @@ export default function MessagesScreen({
       }).eq('id', selectedChat.id);
     }
 
-    await upsertStreak(chatIsRoom ? null : selectedChat.id);
+    const partnerId = isDirect
+      ? ('type' in selectedChat ? (selectedChat as ChatRoom).members.find(m => m !== currentUser.id) : (selectedChat as User).id)
+      : null;
+    await upsertStreak(partnerId || null);
 
     setInputText('');
     setReplyingToMessage(null);
@@ -785,8 +928,16 @@ export default function MessagesScreen({
       text: messageToForward.text, media_url: messageToForward.mediaUrl,
       media_type: messageToForward.mediaType, created_at: new Date().toISOString(),
     };
-    if (isRoomTarget) payload.room_id = targetId;
-    else payload.receiver_id = targetId;
+    if (isRoomTarget) {
+      payload.room_id = targetId;
+      const targetRoom = rooms.find(r => r.id === targetId);
+      if (targetRoom && targetRoom.type === 'direct') {
+        const otherId = targetRoom.members.find(m => m !== currentUser.id) || targetRoom.creatorId;
+        payload.receiver_id = otherId;
+      }
+    } else {
+      payload.receiver_id = targetId;
+    }
     await supabase.from('messages').insert(payload);
     setShowForwardModal(false);
     setMessageToForward(null);
@@ -1040,6 +1191,7 @@ export default function MessagesScreen({
     ? messages.filter(m => m.text?.toLowerCase().includes(activeChatSearchQuery.toLowerCase()))
     : messages;
   const pinnedInChat = messages.filter(m => m.isPinned);
+  const directTargetUser = getDirectTargetUser();
 
   const wallpapers = [
     { label: 'Default', value: '' },
@@ -1061,8 +1213,8 @@ export default function MessagesScreen({
         <div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-between p-8">
           {activeCall.type === 'video' && <video ref={localVideoRef} autoPlay muted playsInline className="absolute inset-0 w-full h-full object-cover opacity-60" />}
           <div className="relative z-10 flex flex-col items-center gap-3 pt-16">
-            {selectedChat && !isRoom && <img src={(selectedChat as User).avatar} alt="" className="w-24 h-24 rounded-full border-4 border-white/20 object-cover" />}
-            <p className="text-white text-xl font-bold">{selectedChat && !isRoom ? (selectedChat as User).name : ''}</p>
+            {selectedChat && isDirect && <img src={isRoom ? (selectedChat as ChatRoom).avatar : (selectedChat as User).avatar} alt="" className="w-24 h-24 rounded-full border-4 border-white/20 object-cover" />}
+            <p className="text-white text-xl font-bold">{selectedChat && isDirect ? (isRoom ? (selectedChat as ChatRoom).name : (selectedChat as User).name) : ''}</p>
             <p className="text-white/60 text-sm">{activeCall.status === 'ringing' ? 'Ringing...' : formatDur(callDuration)}</p>
             <div className="flex items-center gap-1.5 bg-emerald-500/20 text-emerald-400 text-xs font-bold px-3 py-1 rounded-full"><Lock className="w-3 h-3" />End-to-End Encrypted</div>
           </div>
@@ -1125,7 +1277,12 @@ export default function MessagesScreen({
                 {isSearchingUsers && <div className="p-3 text-center text-stone-500 text-xs">Searching...</div>}
                 {!isSearchingUsers && searchedUsers.length === 0 && <div className="p-3 text-center text-stone-500 text-xs">No users found</div>}
                 {searchedUsers.map(u => (
-                  <button key={u.id} onClick={() => { setSelectedChat(u); setUserSearchQuery(''); setSearchedUsers([]); }} className="w-full flex items-center gap-3 p-3 hover:bg-stone-800 transition-all text-left cursor-pointer">
+                  <button key={u.id} onClick={async () => {
+                    setUserSearchQuery('');
+                    setSearchedUsers([]);
+                    const room = await ensureDirectRoom(u.id);
+                    if (room) setSelectedChat(room);
+                  }} className="w-full flex items-center gap-3 p-3 hover:bg-stone-800 transition-all text-left cursor-pointer">
                     <img src={u.avatar || `https://api.dicebear.com/7.x/adventurer/svg?seed=${u.username}`} alt="" className="w-9 h-9 rounded-full object-cover border border-stone-700" />
                     <div className="min-w-0">
                       <p className="text-sm font-bold text-stone-100 truncate">{u.name}</p>
@@ -1208,44 +1365,50 @@ export default function MessagesScreen({
             <div className="flex items-center gap-3 px-4 py-3 bg-stone-950/90 border-b border-stone-900 backdrop-blur-md">
               <button onClick={() => setSelectedChat(null)} className="md:hidden p-2 text-stone-400 hover:text-stone-200 rounded-xl cursor-pointer"><ChevronLeft className="w-5 h-5" /></button>
               <img
-                src={!isRoom ? ((selectedChat as User).avatar || `https://api.dicebear.com/7.x/adventurer/svg?seed=${(selectedChat as User).username}`) : ((selectedChat as ChatRoom).avatar || '')}
+                src={isDirect ? (isRoom ? (selectedChat as ChatRoom).avatar : (selectedChat as User).avatar) || `https://api.dicebear.com/7.x/adventurer/svg?seed=${isRoom ? (selectedChat as ChatRoom).name : (selectedChat as User).username}` : ((selectedChat as ChatRoom).avatar || '')}
                 alt="" className="w-10 h-10 rounded-full object-cover border border-stone-800 cursor-pointer"
-                onClick={() => !isRoom && onViewProfile?.((selectedChat as User).id)}
+                onClick={() => {
+                  const targetId = !isRoom ? (selectedChat as User).id : (selectedChat as ChatRoom).members.find(m => m !== currentUser.id);
+                  if (targetId) onViewProfile?.(targetId);
+                }}
               />
-              <div className="flex-1 min-w-0 cursor-pointer" onClick={() => !isRoom && onViewProfile?.((selectedChat as User).id)}>
+              <div className="flex-1 min-w-0 cursor-pointer" onClick={() => {
+                const targetId = !isRoom ? (selectedChat as User).id : (selectedChat as ChatRoom).members.find(m => m !== currentUser.id);
+                if (targetId) onViewProfile?.(targetId);
+              }}>
                 <div className="flex items-center gap-2">
                   <p className="font-bold text-stone-100 text-sm truncate hover:text-violet-400 transition-colors">
                     {!isRoom ? (selectedChat as User).name : (selectedChat as ChatRoom).name}
                   </p>
-                  {!isRoom && (() => { const s = getStreak((selectedChat as User).id); return s && s.count > 0 ? <span className="text-xs font-black text-orange-400 flex items-center gap-0.5"><Flame className="w-3 h-3" />{s.count}</span> : null; })()}
+                  {isDirect && (() => {
+                    const targetId = !isRoom ? (selectedChat as User).id : (selectedChat as ChatRoom).members.find(m => m !== currentUser.id);
+                    const s = targetId ? getStreak(targetId) : null;
+                    return s && s.count > 0 ? <span className="text-xs font-black text-orange-400 flex items-center gap-0.5"><Flame className="w-3 h-3" />{s.count}</span> : null;
+                  })()}
                 </div>
                 <p className="text-xs text-stone-500 truncate">
                   {Object.values(typingUsers).length > 0
                     ? <span className="text-violet-400 animate-pulse">typing...</span>
-                    : isRoom ? `${(selectedChat as ChatRoom).members.length} members` : `@${(selectedChat as User).username}`}
+                    : isRoom && (selectedChat as ChatRoom).type !== 'direct' ? `${(selectedChat as ChatRoom).members.length} members` : `@${isRoom ? (selectedChat as ChatRoom).description?.replace('@', '') : (selectedChat as User).username}`}
                 </p>
               </div>
               <div className="flex items-center gap-1">
                 {pinnedInChat.length > 0 && <button onClick={() => setShowPinnedMessagesModal(true)} className="p-2 text-amber-400 hover:bg-amber-500/10 rounded-xl cursor-pointer" title="Pinned"><Pin className="w-4 h-4" /></button>}
                 <button onClick={() => setShowActiveChatSearch(!showActiveChatSearch)} className="p-2 text-stone-400 hover:text-stone-200 hover:bg-stone-900/60 rounded-xl cursor-pointer"><Search className="w-4 h-4" /></button>
-                {!isRoom && <button
-                  onClick={() => {
-                    if (selectedChat && !isRoom && onStartCall) {
-                      onStartCall(selectedChat as User, 'audio');
-                    }
-                  }}
-                  className="p-2 text-stone-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-xl cursor-pointer transition-all"
-                  title="Voice call"
-                ><Phone className="w-4 h-4" /></button>}
-                {!isRoom && <button
-                  onClick={() => {
-                    if (selectedChat && !isRoom && onStartCall) {
-                      onStartCall(selectedChat as User, 'video');
-                    }
-                  }}
-                  className="p-2 text-stone-400 hover:text-blue-400 hover:bg-blue-500/10 rounded-xl cursor-pointer transition-all"
-                  title="Video call"
-                ><Video className="w-4 h-4" /></button>}
+                {isDirect && directTargetUser && (
+                  <>
+                    <button
+                      onClick={() => onStartCall?.(directTargetUser, 'audio')}
+                      className="p-2 text-stone-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-xl cursor-pointer transition-all"
+                      title="Voice call"
+                    ><Phone className="w-4 h-4" /></button>
+                    <button
+                      onClick={() => onStartCall?.(directTargetUser, 'video')}
+                      className="p-2 text-stone-400 hover:text-blue-400 hover:bg-blue-500/10 rounded-xl cursor-pointer transition-all"
+                      title="Video call"
+                    ><Video className="w-4 h-4" /></button>
+                  </>
+                )}
                 <button onClick={() => setShowKeyVerification(!showKeyVerification)} className="p-2 text-stone-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-xl cursor-pointer" title="E2EE"><Lock className="w-4 h-4" /></button>
               </div>
             </div>
@@ -1346,7 +1509,7 @@ export default function MessagesScreen({
                       </div>
                     )}
                     <div className={`max-w-[70%] ${me ? 'items-end' : 'items-start'} flex flex-col`}>
-                      {isRoom && !me && <p className="text-[10px] text-stone-500 mb-1 px-1">{msg.senderName}</p>}
+                      {isRoom && (selectedChat as ChatRoom).type !== 'direct' && !me && <p className="text-[10px] text-stone-500 mb-1 px-1">{msg.senderName}</p>}
                       {msg.replyToId && (
                         <div className={`mb-1 px-3 py-1.5 rounded-xl border-l-2 border-violet-500 text-xs ${me ? 'bg-violet-900/30' : 'bg-stone-800/60'}`}>
                           <p className="text-violet-400 font-bold text-[10px]">{msg.replyToSenderName}</p>
