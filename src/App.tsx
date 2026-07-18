@@ -395,7 +395,20 @@ export default function App() {
             {activeTab === 'messages' && (
               <MessagesScreen
                 currentUser={currentUser}
-                onViewProfile={() => { setActiveTab('profile'); }}
+                onViewProfile={async (userId, username) => {
+                  if (username) {
+                    navigate(`/${username}`);
+                  } else {
+                    const { data } = await supabase
+                      .from('profiles')
+                      .select('username')
+                      .eq('id', userId)
+                      .maybeSingle();
+                    if (data?.username) {
+                      navigate(`/${data.username}`);
+                    }
+                  }
+                }}
                 onActiveChatChange={setIsChatActive}
                 activeChatUserId={activeChatUserId}
                 onClearActiveChatUser={() => setActiveChatUserId(undefined)}

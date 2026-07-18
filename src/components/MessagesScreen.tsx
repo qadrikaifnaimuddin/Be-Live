@@ -25,7 +25,7 @@ import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 interface MessagesScreenProps {
   currentUser: User;
   onViewPost?: (postId: string) => void;
-  onViewProfile?: (userId: string) => void;
+  onViewProfile?: (userId: string, username?: string) => void;
   allPosts?: Post[];
   onActiveChatChange?: (active: boolean) => void;
   onUpdateProfile?: (updatedFields: Partial<User>) => void;
@@ -158,6 +158,9 @@ const dbRowToMessage = (row: any): Message => ({
   isForwarded: row.is_forwarded,
   isRead: row.is_read,
   isDelivered: row.is_delivered,
+  deliveredAt: row.delivered_at,
+  readAt: row.read_at,
+  deletedBy: row.deleted_by || [],
   pollQuestion: row.poll_question,
   pollOptions: row.poll_options,
   pollVotes: row.poll_votes || {},
@@ -182,6 +185,7 @@ const dbRowToRoom = (row: any): ChatRoom => ({
   lastMessage: row.last_message,
   lastMessageTime: row.last_message_time,
   createdAt: row.created_at,
+  deletedBy: row.deleted_by || [],
 });
 
 // ─────────────────────────────────────────────
@@ -324,6 +328,16 @@ export default function MessagesScreen({
   const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
   const [targetUserProfile, setTargetUserProfile] = useState<any>(null);
   const [isTargetUserOnline, setIsTargetUserOnline] = useState<boolean>(false);
+  const [selectedTimestampMessageId, setSelectedTimestampMessageId] = useState<string | null>(null);
+  const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
+  const [isSelectionMode, setIsSelectionMode] = useState<boolean>(false);
+  const [sidebarTypingUsers, setSidebarTypingUsers] = useState<Record<string, boolean>>({});
+  const [showCallMenu, setShowCallMenu] = useState<boolean>(false);
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const [dragX, setDragX] = useState<number>(0);
+  const dragStartXRef = useRef<number>(0);
+  const holdTimerRef = useRef<any>(null);
+  const chatDeleteHoldTimerRef = useRef<any>(null);
 
   // ── Poll ──
   const [showPollBuilder, setShowPollBuilder] = useState(false);
@@ -482,7 +496,7 @@ export default function MessagesScreen({
     try {
       const { data, error } = await supabase
         .from('chat_rooms')
-        .select('id, name, type, avatar, members, last_message, last_message_time, creator_id, admin_ids, allow_anonymous, description, created_at')
+        .select('id, name, type, avatar, members, last_message, last_message_time, creator_id, admin_ids, allow_anonymous, description, created_at, deleted_by')
         .contains('members', [currentUser.id])
         .order('last_message_time', { ascending: false, nullsFirst: false })
         .limit(50);
@@ -499,7 +513,7 @@ export default function MessagesScreen({
       if (otherUserIds.length > 0) {
         const { data: profiles } = await supabase
           .from('profiles')
-          .select('id, name, username, avatar')
+          .select('id, name, username, avatar, last_seen')
           .in('id', otherUserIds);
 
         if (profiles) {
@@ -512,13 +526,15 @@ export default function MessagesScreen({
                 r.name = prof.name || `@${prof.username}`;
                 r.avatar = prof.avatar || `https://api.dicebear.com/7.x/adventurer/svg?seed=${prof.username}`;
                 r.description = `@${prof.username}`;
+                r.lastSeen = prof.last_seen;
               }
             }
           });
         }
       }
 
-      setRooms(parsedRooms);
+      const activeRooms = parsedRooms.filter(r => !r.deletedBy || !r.deletedBy.includes(currentUser.id));
+      setRooms(activeRooms);
     } catch (err) {
       console.error('[Messages] loadRooms:', err);
     }
@@ -548,6 +564,17 @@ export default function MessagesScreen({
         if (payload.new && !payload.new.is_delivered) {
           supabase.from('messages').update({ is_delivered: true }).eq('id', payload.new.id).then();
         }
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'messages'
+      }, () => {
+        loadRooms();
+      })
+      .on('broadcast', { event: 'typing_status' }, (payload) => {
+        const { senderId, isTyping } = payload.payload;
+        setSidebarTypingUsers(prev => ({ ...prev, [senderId]: isTyping }));
       })
       .subscribe();
 
@@ -591,7 +618,8 @@ export default function MessagesScreen({
 
       const { data, error } = await query;
       if (error) throw error;
-      setMessages((data || []).map(dbRowToMessage));
+      const filteredMsgs = (data || []).map(dbRowToMessage).filter(m => !m.deletedBy || !m.deletedBy.includes(currentUser.id));
+      setMessages(filteredMsgs);
     } catch (err) {
       console.error('[Messages] loadMessages:', err);
     } finally {
@@ -636,13 +664,34 @@ export default function MessagesScreen({
         if (newMsg.senderId !== currentUser.id) {
           playChatSound('receive');
           if (!payload.new.is_read || !payload.new.is_delivered) {
-            supabase.from('messages').update({ is_delivered: true, is_read: true }).eq('id', newMsg.id).then();
+            const now = new Date().toISOString();
+            supabase.from('messages').update({
+              is_delivered: true,
+              is_read: true,
+              delivered_at: now,
+              read_at: now
+            }).eq('id', newMsg.id).then();
+
+            // Broadcast checkmarks instantly
+            channel.send({
+              type: 'broadcast',
+              event: 'status_update',
+              payload: { messageId: newMsg.id, isRead: true, isDelivered: true, readAt: now, deliveredAt: now }
+            });
           }
         }
       })
+      .on('broadcast', { event: 'status_update' }, (payload) => {
+        const { messageId, isRead, isDelivered, readAt, deliveredAt } = payload.payload;
+        setMessages(prev => prev.map(m => m.id === messageId ? { ...m, isRead, isDelivered, readAt, deliveredAt } : m));
+      })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, (payload) => {
         const updated = dbRowToMessage(payload.new);
-        setMessages(prev => prev.map(m => m.id === updated.id ? updated : m));
+        if (updated.deletedBy && updated.deletedBy.includes(currentUser.id)) {
+          setMessages(prev => prev.filter(m => m.id !== updated.id));
+        } else {
+          setMessages(prev => prev.map(m => m.id === updated.id ? updated : m));
+        }
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, (payload) => {
         setMessages(prev => prev.filter(m => m.id !== payload.old.id));
@@ -690,8 +739,26 @@ export default function MessagesScreen({
     const unread = messages.filter(m => m.senderId !== currentUser.id && !m.isRead);
     if (unread.length === 0) return;
     const ids = unread.map(m => m.id);
-    supabase.from('messages').update({ is_read: true }).in('id', ids).then(({ error }) => {
-      if (!error) setMessages(prev => prev.map(m => ids.includes(m.id) ? { ...m, isRead: true } : m));
+    const now = new Date().toISOString();
+    supabase.from('messages').update({
+      is_read: true,
+      read_at: now,
+      is_delivered: true,
+      delivered_at: now
+    }).in('id', ids).then(({ error }) => {
+      if (!error) {
+        setMessages(prev => prev.map(m => ids.includes(m.id) ? { ...m, isRead: true, isDelivered: true, readAt: now, deliveredAt: now } : m));
+        // Broadcast read checkmarks instantly to sender
+        if (realtimeChannelRef.current) {
+          ids.forEach(id => {
+            realtimeChannelRef.current.send({
+              type: 'broadcast',
+              event: 'status_update',
+              payload: { messageId: id, isRead: true, isDelivered: true, readAt: now, deliveredAt: now }
+            });
+          });
+        }
+      }
     });
   }, [selectedChat, messages, currentUser.id]);
 
@@ -711,6 +778,138 @@ export default function MessagesScreen({
       return date.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     } catch {
       return 'recently';
+    }
+  };
+
+  const formatFullTime = (isoString: string) => {
+    try {
+      const date = new Date(isoString);
+      return date.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch {
+      return '';
+    }
+  };
+
+  const handleDragStart = (e: React.MouseEvent | React.TouchEvent, msgId: string) => {
+    if (isSelectionMode) return;
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    dragStartXRef.current = clientX;
+    setActiveDragId(msgId);
+  };
+
+  const handleDragMove = (e: React.MouseEvent | React.TouchEvent) => {
+    if (!activeDragId) return;
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const deltaX = clientX - dragStartXRef.current;
+    if (deltaX > 0) {
+      setDragX(Math.min(60, deltaX));
+    }
+  };
+
+  const handleDragEnd = (msg: Message) => {
+    if (activeDragId === msg.id && dragX > 40) {
+      setReplyingToMessage(msg);
+    }
+    setActiveDragId(null);
+    setDragX(0);
+  };
+
+  const startMessageHold = (msgId: string, isMyMsg: boolean) => {
+    if (isSelectionMode) return;
+    holdTimerRef.current = setTimeout(() => {
+      if (isMyMsg) {
+        setIsSelectionMode(true);
+        setSelectedMessageIds([msgId]);
+      }
+    }, 800);
+  };
+
+  const cancelMessageHold = () => {
+    clearTimeout(holdTimerRef.current);
+  };
+
+  const isOnlinePlatformWide = (lastSeenIso?: string) => {
+    if (!lastSeenIso) return false;
+    const diff = Date.now() - new Date(lastSeenIso).getTime();
+    return diff < 40000;
+  };
+
+  const deleteWholeChat = async (roomId: string) => {
+    if (!isSupabaseConfigured || !supabase || !currentUser?.id) return;
+    try {
+      const room = rooms.find(r => r.id === roomId);
+      if (!room) return;
+      const updatedDeletedBy = room.deletedBy ? [...room.deletedBy, currentUser.id] : [currentUser.id];
+      await supabase.from('chat_rooms').update({ deleted_by: updatedDeletedBy }).eq('id', roomId);
+
+      const { data: messagesToUpdate } = await supabase
+        .from('messages')
+        .select('id, deleted_by')
+        .eq('room_id', roomId);
+        
+      if (messagesToUpdate && messagesToUpdate.length > 0) {
+        for (const msg of messagesToUpdate) {
+          const mDel = msg.deleted_by ? [...msg.deleted_by, currentUser.id] : [currentUser.id];
+          await supabase.from('messages').update({ deleted_by: mDel }).eq('id', msg.id);
+        }
+      }
+
+      if (room.type === 'direct') {
+        const otherId = room.members.find(m => m !== currentUser.id);
+        if (otherId) {
+          const { data: legacyMsgs } = await supabase
+            .from('messages')
+            .select('id, deleted_by')
+            .or(`and(sender_id.eq.${currentUser.id},receiver_id.eq.${otherId}),and(sender_id.eq.${otherId},receiver_id.eq.${currentUser.id})`);
+          if (legacyMsgs && legacyMsgs.length > 0) {
+            for (const msg of legacyMsgs) {
+              const mDel = msg.deleted_by ? [...msg.deleted_by, currentUser.id] : [currentUser.id];
+              await supabase.from('messages').update({ deleted_by: mDel }).eq('id', msg.id);
+            }
+          }
+        }
+      }
+
+      setRooms(prev => prev.filter(r => r.id !== roomId));
+      if (selectedChat && 'type' in selectedChat && (selectedChat as ChatRoom).id === roomId) {
+        setSelectedChat(null);
+      }
+      loadRooms();
+    } catch (err) {
+      console.error('Failed to delete chat:', err);
+    }
+  };
+
+  const startChatDeleteHold = (roomId: string) => {
+    chatDeleteHoldTimerRef.current = setTimeout(() => {
+      const ok = window.confirm("Are you sure you want to delete this chat? The chat history will be cleared from your end.");
+      if (ok) {
+        deleteWholeChat(roomId);
+      }
+      chatDeleteHoldTimerRef.current = null;
+    }, 2000);
+  };
+
+  const cancelChatDeleteHold = () => {
+    if (chatDeleteHoldTimerRef.current) {
+      clearTimeout(chatDeleteHoldTimerRef.current);
+      chatDeleteHoldTimerRef.current = null;
+    }
+  };
+
+  const unsendSelectedMessages = async () => {
+    if (!isSupabaseConfigured || !supabase || selectedMessageIds.length === 0) return;
+    const ok = window.confirm(`Are you sure you want to unsend these ${selectedMessageIds.length} messages? They will be deleted for everyone.`);
+    if (!ok) return;
+    try {
+      const { error } = await supabase.from('messages').delete().in('id', selectedMessageIds);
+      if (error) throw error;
+      setMessages(prev => prev.filter(m => !selectedMessageIds.includes(m.id)));
+      setIsSelectionMode(false);
+      setSelectedMessageIds([]);
+    } catch (err) {
+      console.error('Failed to unsend messages:', err);
+      alert('Failed to unsend messages.');
     }
   };
 
@@ -840,13 +1039,39 @@ export default function MessagesScreen({
   // ─────────────────────────────────────────────
   const broadcastTyping = (isTyping: boolean) => {
     realtimeChannelRef.current?.track({ userId: currentUser.id, username: currentUser.username, isTyping });
+    if (!selectedChat || !isSupabaseConfigured || !supabase) return;
+    const chatIsRoom = 'type' in selectedChat;
+    const isDirect = !chatIsRoom || (selectedChat as ChatRoom).type === 'direct';
+    if (!isDirect) return;
+    const otherId = chatIsRoom
+      ? (selectedChat as ChatRoom).members.find(m => m !== currentUser.id)
+      : (selectedChat as User).id;
+      
+    if (otherId) {
+      supabase.channel(`global-chat-${otherId}`).send({
+        type: 'broadcast',
+        event: 'typing_status',
+        payload: { senderId: currentUser.id, isTyping }
+      }).then();
+    }
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInputText(e.target.value);
-    broadcastTyping(true);
+    const val = e.target.value;
+    setInputText(val);
+    if (val.trim()) {
+      broadcastTyping(true);
+      clearTimeout(typingTimerRef.current);
+      typingTimerRef.current = setTimeout(() => broadcastTyping(false), 1500);
+    } else {
+      broadcastTyping(false);
+      clearTimeout(typingTimerRef.current);
+    }
+  };
+
+  const handleInputBlur = () => {
+    broadcastTyping(false);
     clearTimeout(typingTimerRef.current);
-    typingTimerRef.current = setTimeout(() => broadcastTyping(false), 1500);
   };
 
   // ─────────────────────────────────────────────
@@ -1471,10 +1696,28 @@ export default function MessagesScreen({
               .filter(r => activeSidebarTab === 'all' || r.type === activeSidebarTab || (activeSidebarTab === 'direct' && r.type === 'direct'))
               .map(room => {
                 const sel = selectedChat && 'type' in selectedChat && (selectedChat as ChatRoom).id === room.id;
+                const otherMemberId = room.type === 'direct' ? room.members.find(m => m !== currentUser.id) : null;
+                const isOnline = room.type === 'direct' && otherMemberId && isOnlinePlatformWide(room.lastSeen);
                 return (
-                  <button key={room.id} onClick={() => setSelectedChat(room)} className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-stone-900/60 transition-all text-left cursor-pointer border-b border-stone-900/40 ${sel ? 'bg-violet-500/10 border-l-2 border-l-violet-500' : ''}`}>
-                    <div className="relative">
+                  <button
+                    key={room.id}
+                    onClick={() => {
+                      if (!chatDeleteHoldTimerRef.current) {
+                        setSelectedChat(room);
+                      }
+                    }}
+                    onMouseDown={() => startChatDeleteHold(room.id)}
+                    onMouseUp={cancelChatDeleteHold}
+                    onMouseLeave={cancelChatDeleteHold}
+                    onTouchStart={() => startChatDeleteHold(room.id)}
+                    onTouchEnd={cancelChatDeleteHold}
+                    className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-stone-900/60 transition-all text-left cursor-pointer border-b border-stone-900/40 ${sel ? 'bg-violet-500/10 border-l-2 border-l-violet-500' : ''}`}
+                  >
+                    <div className="relative shrink-0">
                       <img src={room.avatar || 'https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&w=60&h=60&q=80'} alt={room.name} className="w-11 h-11 rounded-full object-cover border border-stone-800" />
+                      {isOnline && (
+                        <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 rounded-full border-2 border-stone-950" />
+                      )}
                       {room.type === 'group' && <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-violet-600 rounded-full flex items-center justify-center"><Users className="w-2.5 h-2.5 text-white" /></div>}
                       {room.type === 'channel' && <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-amber-500 rounded-full flex items-center justify-center"><Radio className="w-2.5 h-2.5 text-white" /></div>}
                     </div>
@@ -1483,7 +1726,11 @@ export default function MessagesScreen({
                         <p className="text-sm font-bold text-stone-100 truncate">{room.name}</p>
                         {room.lastMessageTime && <span className="text-[10px] text-stone-600 shrink-0">{formatTime(room.lastMessageTime)}</span>}
                       </div>
-                      <p className="text-xs text-stone-500 truncate">{room.lastMessage || 'No messages yet'}</p>
+                      {room.type === 'direct' && otherMemberId && sidebarTypingUsers[otherMemberId] ? (
+                        <p className="text-xs text-violet-400 font-medium animate-pulse">typing...</p>
+                      ) : (
+                        <p className="text-xs text-stone-500 truncate">{room.lastMessage || 'No messages yet'}</p>
+                      )}
                     </div>
                   </button>
                 );
@@ -1494,72 +1741,117 @@ export default function MessagesScreen({
         {/* ═══ CHAT PANEL ═══ */}
         {selectedChat ? (
           <div className="flex-1 flex flex-col min-w-0 relative">
-            {/* Chat header */}
-            <div className="flex items-center gap-3 px-4 py-3 bg-stone-950/90 border-b border-stone-900 backdrop-blur-md">
-              <button onClick={() => setSelectedChat(null)} className="md:hidden p-2 text-stone-400 hover:text-stone-200 rounded-xl cursor-pointer"><ChevronLeft className="w-5 h-5" /></button>
-              <img
-                src={isDirect ? (isRoom ? (selectedChat as ChatRoom).avatar : (selectedChat as User).avatar) || `https://api.dicebear.com/7.x/adventurer/svg?seed=${isRoom ? (selectedChat as ChatRoom).name : (selectedChat as User).username}` : ((selectedChat as ChatRoom).avatar || '')}
-                alt="" className="w-10 h-10 rounded-full object-cover border border-stone-800 cursor-pointer"
-                onClick={() => {
-                  const targetId = !isRoom ? (selectedChat as User).id : (selectedChat as ChatRoom).members.find(m => m !== currentUser.id);
-                  if (targetId) onViewProfile?.(targetId);
-                }}
-              />
-              <div className="flex-1 min-w-0 cursor-pointer" onClick={() => {
-                const targetId = !isRoom ? (selectedChat as User).id : (selectedChat as ChatRoom).members.find(m => m !== currentUser.id);
-                if (targetId) onViewProfile?.(targetId);
-              }}>
+            {/* Chat header OR Selection Action Bar */}
+            {isSelectionMode ? (
+              <div className="flex items-center justify-between px-4 py-3 bg-stone-950/90 border-b border-stone-900 backdrop-blur-md">
                 <div className="flex items-center gap-2">
-                  <p className="font-bold text-stone-100 text-sm truncate hover:text-violet-400 transition-colors">
-                    {!isRoom ? (selectedChat as User).name : (selectedChat as ChatRoom).name}
-                  </p>
-                  {isDirect && (() => {
-                    const targetId = !isRoom ? (selectedChat as User).id : (selectedChat as ChatRoom).members.find(m => m !== currentUser.id);
-                    const s = targetId ? getStreak(targetId) : null;
-                    return s && s.count > 0 ? <span className="text-xs font-black text-orange-400 flex items-center gap-0.5"><Flame className="w-3 h-3" />{s.count}</span> : null;
-                  })()}
+                  <button onClick={() => { setIsSelectionMode(false); setSelectedMessageIds([]); }} className="p-2 text-stone-400 hover:text-stone-200 rounded-xl cursor-pointer">
+                    <X className="w-5 h-5" />
+                  </button>
+                  <span className="text-sm font-bold text-stone-200">{selectedMessageIds.length} Selected</span>
                 </div>
-                <p className="text-xs text-stone-500 truncate flex items-center gap-1">
-                  {Object.values(typingUsers).length > 0 ? (
-                    <span className="text-violet-400 animate-pulse font-medium">typing...</span>
-                  ) : isRoom && (selectedChat as ChatRoom).type !== 'direct' ? (
-                    `${(selectedChat as ChatRoom).members.length} members`
-                  ) : isDirect ? (
-                    isTargetUserOnline ? (
-                      <span className="text-emerald-400 flex items-center gap-1 font-medium">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                        Online
-                      </span>
-                    ) : targetUserProfile?.last_seen ? (
-                      `Last seen ${formatLastSeen(targetUserProfile.last_seen)}`
-                    ) : (
-                      `@${isRoom ? (selectedChat as ChatRoom).description?.replace('@', '') : (selectedChat as User).username}`
-                    )
-                  ) : (
-                    `@${isRoom ? (selectedChat as ChatRoom).description?.replace('@', '') : (selectedChat as User).username}`
+                <button
+                  onClick={unsendSelectedMessages}
+                  disabled={selectedMessageIds.length === 0}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Unsend
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 px-4 py-3 bg-stone-950/90 border-b border-stone-900 backdrop-blur-md">
+                <button onClick={() => setSelectedChat(null)} className="md:hidden p-2 text-stone-400 hover:text-stone-200 rounded-xl cursor-pointer"><ChevronLeft className="w-5 h-5" /></button>
+                {(() => {
+                  const getTargetUsername = () => {
+                    if (!selectedChat) return '';
+                    if (!('type' in selectedChat)) return (selectedChat as User).username;
+                    if ((selectedChat as ChatRoom).description) return (selectedChat as ChatRoom).description!.replace('@', '');
+                    return targetUserProfile?.username || '';
+                  };
+                  const targetId = !isRoom ? (selectedChat as User).id : (selectedChat as ChatRoom).members.find(m => m !== currentUser.id);
+                  const username = getTargetUsername();
+                  return (
+                    <>
+                      <img
+                        src={isDirect ? (isRoom ? (selectedChat as ChatRoom).avatar : (selectedChat as User).avatar) || `https://api.dicebear.com/7.x/adventurer/svg?seed=${isRoom ? (selectedChat as ChatRoom).name : (selectedChat as User).username}` : ((selectedChat as ChatRoom).avatar || '')}
+                        alt="" className="w-10 h-10 rounded-full object-cover border border-stone-800 cursor-pointer"
+                        onClick={() => {
+                          if (targetId) onViewProfile?.(targetId, username);
+                        }}
+                      />
+                      <div className="flex-1 min-w-0 cursor-pointer" onClick={() => {
+                        if (targetId) onViewProfile?.(targetId, username);
+                      }}>
+                        <div className="flex items-center gap-2">
+                          <p className="font-bold text-stone-100 text-sm truncate hover:text-violet-400 transition-colors">
+                            {!isRoom ? (selectedChat as User).name : (selectedChat as ChatRoom).name}
+                          </p>
+                          {isDirect && (() => {
+                            const s = targetId ? getStreak(targetId) : null;
+                            return s && s.count > 0 ? <span className="text-xs font-black text-orange-400 flex items-center gap-0.5"><Flame className="w-3 h-3" />{s.count}</span> : null;
+                          })()}
+                        </div>
+                        <p className="text-xs text-stone-500 truncate flex items-center gap-1">
+                          {Object.values(typingUsers).length > 0 ? (
+                            <span className="text-violet-400 animate-pulse font-medium">typing...</span>
+                          ) : isRoom && (selectedChat as ChatRoom).type !== 'direct' ? (
+                            `${(selectedChat as ChatRoom).members.length} members`
+                          ) : isDirect ? (
+                            isTargetUserOnline ? (
+                              <span className="text-emerald-400 flex items-center gap-1 font-medium">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                Online
+                              </span>
+                            ) : targetUserProfile?.last_seen ? (
+                              `Last seen ${formatLastSeen(targetUserProfile.last_seen)}`
+                            ) : (
+                              `@${isRoom ? (selectedChat as ChatRoom).description?.replace('@', '') : (selectedChat as User).username}`
+                            )
+                          ) : (
+                            `@${isRoom ? (selectedChat as ChatRoom).description?.replace('@', '') : (selectedChat as User).username}`
+                          )}
+                        </p>
+                      </div>
+                    </>
+                  );
+                })()}
+                <div className="flex items-center gap-1">
+                  {pinnedInChat.length > 0 && <button onClick={() => setShowPinnedMessagesModal(true)} className="p-2 text-amber-400 hover:bg-amber-500/10 rounded-xl cursor-pointer" title="Pinned"><Pin className="w-4 h-4" /></button>}
+                  <button onClick={() => setShowActiveChatSearch(!showActiveChatSearch)} className="p-2 text-stone-400 hover:text-stone-200 hover:bg-stone-900/60 rounded-xl cursor-pointer"><Search className="w-4 h-4" /></button>
+                  {isDirect && directTargetUser && (
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowCallMenu(v => !v)}
+                        className={`p-2 rounded-xl transition-all cursor-pointer ${showCallMenu ? 'bg-stone-800 text-stone-200' : 'text-stone-400 hover:text-stone-200 hover:bg-stone-900/60'}`}
+                        title="Call"
+                      >
+                        <Phone className="w-4 h-4" />
+                      </button>
+                      {showCallMenu && (
+                        <div className="absolute right-0 top-full mt-2 w-36 bg-stone-900 border border-stone-800 rounded-2xl p-1.5 shadow-2xl z-30 flex flex-col gap-1">
+                          <button
+                            onClick={() => { onStartCall?.(directTargetUser, 'audio'); setShowCallMenu(false); }}
+                            className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-stone-300 hover:text-white hover:bg-stone-800 rounded-xl cursor-pointer transition-colors"
+                          >
+                            <Phone className="w-3.5 h-3.5 text-emerald-400" />
+                            Voice Call
+                          </button>
+                          <button
+                            onClick={() => { onStartCall?.(directTargetUser, 'video'); setShowCallMenu(false); }}
+                            className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-stone-300 hover:text-white hover:bg-stone-800 rounded-xl cursor-pointer transition-colors"
+                          >
+                            <Video className="w-3.5 h-3.5 text-blue-400" />
+                            Video Call
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )}
-                </p>
+                  <button onClick={() => setShowKeyVerification(!showKeyVerification)} className="p-2 text-stone-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-xl cursor-pointer" title="E2EE"><Lock className="w-4 h-4" /></button>
+                </div>
               </div>
-              <div className="flex items-center gap-1">
-                {pinnedInChat.length > 0 && <button onClick={() => setShowPinnedMessagesModal(true)} className="p-2 text-amber-400 hover:bg-amber-500/10 rounded-xl cursor-pointer" title="Pinned"><Pin className="w-4 h-4" /></button>}
-                <button onClick={() => setShowActiveChatSearch(!showActiveChatSearch)} className="p-2 text-stone-400 hover:text-stone-200 hover:bg-stone-900/60 rounded-xl cursor-pointer"><Search className="w-4 h-4" /></button>
-                {isDirect && directTargetUser && (
-                  <>
-                    <button
-                      onClick={() => onStartCall?.(directTargetUser, 'audio')}
-                      className="p-2 text-stone-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-xl cursor-pointer transition-all"
-                      title="Voice call"
-                    ><Phone className="w-4 h-4" /></button>
-                    <button
-                      onClick={() => onStartCall?.(directTargetUser, 'video')}
-                      className="p-2 text-stone-400 hover:text-blue-400 hover:bg-blue-500/10 rounded-xl cursor-pointer transition-all"
-                      title="Video call"
-                    ><Video className="w-4 h-4" /></button>
-                  </>
-                )}
-                <button onClick={() => setShowKeyVerification(!showKeyVerification)} className="p-2 text-stone-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-xl cursor-pointer" title="E2EE"><Lock className="w-4 h-4" /></button>
-              </div>
-            </div>
+            )}
 
             {/* Chat search */}
             {showActiveChatSearch && (
@@ -1638,8 +1930,16 @@ export default function MessagesScreen({
                 const me = msg.senderId === currentUser.id;
                 const countdown = messageCountdowns[msg.id];
                 const hasReactions = msg.reactions && Object.keys(msg.reactions).length > 0;
+                const isSelected = selectedMessageIds.includes(msg.id);
                 return (
-                  <div key={msg.id} className={`flex ${me ? 'justify-end' : 'justify-start'} group relative`}>
+                  <div key={msg.id} className={`flex ${me ? 'justify-end' : 'justify-start'} group relative items-center`}>
+                    {isSelectionMode && me && (
+                      <div className="flex items-center justify-center mr-2 shrink-0 self-center">
+                        <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-all ${isSelected ? 'bg-rose-600 border-rose-600' : 'border-stone-600'}`}>
+                          {isSelected && <Check className="w-2.5 h-2.5 text-white" />}
+                        </div>
+                      </div>
+                    )}
                     {/* Hover actions */}
                     <div className={`absolute ${me ? 'right-full mr-2' : 'left-full ml-2'} top-1/2 -translate-y-1/2 hidden group-hover:flex items-center gap-1 z-10`}>
                       <button onClick={() => setActiveEmojisMenu(activeEmojisMenu === msg.id ? null : msg.id)} className="p-1.5 bg-stone-800 border border-stone-700 rounded-lg text-stone-400 hover:text-yellow-400 cursor-pointer"><Smile className="w-3.5 h-3.5" /></button>
@@ -1665,7 +1965,50 @@ export default function MessagesScreen({
                         </div>
                       )}
                       {msg.isForwarded && <p className="text-[10px] text-stone-600 mb-1 px-1 flex items-center gap-1"><Share2 className="w-2.5 h-2.5" />Forwarded</p>}
-                      <div className={`relative rounded-2xl px-3 py-2 ${me ? 'bg-violet-600 text-white rounded-br-sm' : 'bg-stone-800 text-stone-100 rounded-bl-sm'} ${msg.isPinned ? 'ring-1 ring-amber-500/40' : ''}`}>
+                      <div
+                        onMouseDown={(e) => {
+                          startMessageHold(msg.id, me);
+                          handleDragStart(e, msg.id);
+                        }}
+                        onMouseMove={handleDragMove}
+                        onMouseUp={(e) => {
+                          cancelMessageHold();
+                          handleDragEnd(msg);
+                        }}
+                        onMouseLeave={() => {
+                          cancelMessageHold();
+                          setActiveDragId(null);
+                          setDragX(0);
+                        }}
+                        onTouchStart={(e) => {
+                          startMessageHold(msg.id, me);
+                          handleDragStart(e, msg.id);
+                        }}
+                        onTouchMove={handleDragMove}
+                        onTouchEnd={() => {
+                          cancelMessageHold();
+                          handleDragEnd(msg);
+                        }}
+                        onClick={(e) => {
+                          if (isSelectionMode) {
+                            e.stopPropagation();
+                            if (me) {
+                              setSelectedMessageIds(prev =>
+                                prev.includes(msg.id)
+                                  ? prev.filter(id => id !== msg.id)
+                                  : [...prev, msg.id]
+                              );
+                            }
+                          } else {
+                            setSelectedTimestampMessageId(selectedTimestampMessageId === msg.id ? null : msg.id);
+                          }
+                        }}
+                        style={{
+                          transform: activeDragId === msg.id ? `translateX(${dragX}px)` : 'none',
+                          transition: activeDragId === msg.id ? 'none' : 'transform 0.2s ease-out'
+                        }}
+                        className={`relative rounded-2xl px-3 py-2 cursor-pointer select-none transition-all ${me ? 'bg-violet-600 text-white rounded-br-sm' : 'bg-stone-800 text-stone-100 rounded-bl-sm'} ${msg.isPinned ? 'ring-1 ring-amber-500/40' : ''} ${isSelected ? 'ring-2 ring-rose-500 bg-rose-950/20' : ''}`}
+                      >
                         {msg.mediaType === 'snap' && (
                           <button onClick={() => openSnap(msg)} className={`flex items-center gap-2 text-sm font-bold cursor-pointer ${msg.snapViewed && msg.senderId !== currentUser.id ? 'opacity-40' : ''}`}>
                             <Eye className="w-4 h-4" />{msg.snapViewed && msg.senderId !== currentUser.id ? 'Snap viewed' : 'View Snap'}
@@ -1707,8 +2050,7 @@ export default function MessagesScreen({
                         {msg.isDisappearing && countdown !== undefined && countdown > 0 && (
                           <p className="text-[10px] opacity-60 mt-0.5 flex items-center gap-1"><Clock className="w-2.5 h-2.5" />{Math.ceil(countdown)}s</p>
                         )}
-                        <div className="flex items-center justify-end gap-1 mt-0.5">
-                          <span className={`text-[10px] ${me ? 'text-white/50' : 'text-stone-600'}`}>{formatTime(msg.createdAt)}</span>
+                        <div className="flex items-center justify-end gap-1 mt-0.5 min-h-[14px]">
                           {me && (
                             msg.isRead ? (
                               <CheckCheck className="w-3.5 h-3.5 text-sky-400" />
@@ -1718,10 +2060,20 @@ export default function MessagesScreen({
                               <Check className="w-3.5 h-3.5 text-stone-500" />
                             )
                           )}
-                          {msg.isE2EE && <Lock className="w-2.5 h-2.5 opacity-40" />}
                           {msg.isPinned && <Pin className="w-2.5 h-2.5 text-amber-400" />}
                         </div>
                       </div>
+                      {selectedTimestampMessageId === msg.id && (
+                        <div className="text-[10px] text-stone-500 mt-1 flex flex-col gap-0.5 bg-stone-900/80 border border-stone-800 rounded-xl px-2.5 py-1.5 min-w-[140px] shadow-lg animate-fadeIn z-10">
+                          <p className="flex justify-between gap-4"><span>Sent:</span> <span className="font-semibold text-stone-300">{formatFullTime(msg.createdAt)}</span></p>
+                          {me && msg.deliveredAt && (
+                            <p className="flex justify-between gap-4"><span>Delivered:</span> <span className="font-semibold text-stone-300">{formatFullTime(msg.deliveredAt)}</span></p>
+                          )}
+                          {me && msg.readAt && (
+                            <p className="flex justify-between gap-4"><span>Seen:</span> <span className="font-semibold text-sky-400">{formatFullTime(msg.readAt)}</span></p>
+                          )}
+                        </div>
+                      )}
                       {hasReactions && (
                         <div className={`flex gap-1 mt-1 ${me ? 'justify-end' : 'justify-start'}`}>
                           {Object.entries(msg.reactions || {}).map(([uid, emoji]) => (
@@ -1818,6 +2170,7 @@ export default function MessagesScreen({
                   <textarea
                     value={inputText}
                     onChange={handleInputChange}
+                    onBlur={handleInputBlur}
                     onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
                     onClick={() => setShowInputMenu(false)}
                     placeholder={`Message ${!isRoom ? `@${(selectedChat as User).username}` : (selectedChat as ChatRoom).name}...`}

@@ -59,6 +59,9 @@ export interface Message {
   createdAt: string;
   isRead?: boolean;
   isDelivered?: boolean;
+  deliveredAt?: string;
+  readAt?: string;
+  deletedBy?: string[];
   
   // Snapchat-like disappearing features
   isDisappearing?: boolean;
@@ -206,6 +209,8 @@ export interface ChatRoom {
   lastMessage?: string;
   lastMessageTime?: string;
   allowAnonymous?: boolean;
+  deletedBy?: string[];
+  lastSeen?: string;
 }
 
 // Snapchat-like Streaks
