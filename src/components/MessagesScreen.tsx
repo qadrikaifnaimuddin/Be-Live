@@ -861,8 +861,13 @@ export default function MessagesScreen({
       setEncryptingMessage(null);
     }
 
-    const { error } = await supabase.from('messages').insert(payload);
+    const { data: newRowData, error } = await supabase.from('messages').insert(payload).select().single();
     if (error) { console.error('[Messages] sendMessage:', error); return; }
+
+    if (newRowData) {
+      const newMsg = dbRowToMessage(newRowData);
+      setMessages(prev => prev.find(m => m.id === newMsg.id) ? prev : [...prev, newMsg]);
+    }
 
     // Update room last message
     if (chatIsRoom) {
@@ -939,7 +944,14 @@ export default function MessagesScreen({
     } else {
       payload.receiver_id = targetId;
     }
-    await supabase.from('messages').insert(payload);
+    const { data: newRowData } = await supabase.from('messages').insert(payload).select().single();
+    if (newRowData && selectedChat) {
+      const isCurrentChat = isRoomTarget ? (selectedChat.id === targetId) : (!('type' in selectedChat) && (selectedChat as User).id === targetId);
+      if (isCurrentChat) {
+        const newMsg = dbRowToMessage(newRowData);
+        setMessages(prev => prev.find(m => m.id === newMsg.id) ? prev : [...prev, newMsg]);
+      }
+    }
     setShowForwardModal(false);
     setMessageToForward(null);
   };
