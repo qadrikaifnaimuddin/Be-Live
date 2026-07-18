@@ -157,6 +157,7 @@ const dbRowToMessage = (row: any): Message => ({
   isPinned: row.is_pinned,
   isForwarded: row.is_forwarded,
   isRead: row.is_read,
+  isDelivered: row.is_delivered,
   pollQuestion: row.poll_question,
   pollOptions: row.poll_options,
   pollVotes: row.poll_votes || {},
@@ -321,6 +322,8 @@ export default function MessagesScreen({
   const [showForwardModal, setShowForwardModal] = useState(false);
   const [showStreakBonus, setShowStreakBonus] = useState<string | null>(null);
   const [typingUsers, setTypingUsers] = useState<Record<string, string>>({});
+  const [targetUserProfile, setTargetUserProfile] = useState<any>(null);
+  const [isTargetUserOnline, setIsTargetUserOnline] = useState<boolean>(false);
 
   // ── Poll ──
   const [showPollBuilder, setShowPollBuilder] = useState(false);
@@ -540,8 +543,11 @@ export default function MessagesScreen({
         schema: 'public',
         table: 'messages',
         filter: `receiver_id=eq.${currentUser.id}`,
-      }, () => {
+      }, (payload) => {
         loadRooms();
+        if (payload.new && !payload.new.is_delivered) {
+          supabase.from('messages').update({ is_delivered: true }).eq('id', payload.new.id).then();
+        }
       })
       .subscribe();
 
@@ -627,7 +633,12 @@ export default function MessagesScreen({
           if (!validDM) return;
         }
         setMessages(prev => prev.find(m => m.id === newMsg.id) ? prev : [...prev, newMsg]);
-        if (newMsg.senderId !== currentUser.id) playChatSound('receive');
+        if (newMsg.senderId !== currentUser.id) {
+          playChatSound('receive');
+          if (!payload.new.is_read || !payload.new.is_delivered) {
+            supabase.from('messages').update({ is_delivered: true, is_read: true }).eq('id', newMsg.id).then();
+          }
+        }
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, (payload) => {
         const updated = dbRowToMessage(payload.new);
@@ -639,10 +650,22 @@ export default function MessagesScreen({
       .on('presence', { event: 'sync' }, () => {
         const state = channel.presenceState();
         const typing: Record<string, string> = {};
+        let otherOnline = false;
+        
+        const otherId = selectedChat && ('type' in selectedChat)
+          ? (selectedChat as ChatRoom).members.find(m => m !== currentUser.id) || (selectedChat as ChatRoom).creatorId
+          : selectedChat ? (selectedChat as User).id : null;
+
         Object.values(state).forEach((presences: any[]) => {
-          presences.forEach(p => { if (p.userId !== currentUser.id && p.isTyping) typing[p.userId] = p.username; });
+          presences.forEach(p => {
+            if (p.userId !== currentUser.id) {
+              if (p.isTyping) typing[p.userId] = p.username;
+              if (otherId && p.userId === otherId) otherOnline = true;
+            }
+          });
         });
         setTypingUsers(typing);
+        setIsTargetUserOnline(otherOnline);
       })
       .subscribe();
 
@@ -671,6 +694,59 @@ export default function MessagesScreen({
       if (!error) setMessages(prev => prev.map(m => ids.includes(m.id) ? { ...m, isRead: true } : m));
     });
   }, [selectedChat, messages, currentUser.id]);
+
+  const formatLastSeen = (isoString: string) => {
+    try {
+      const date = new Date(isoString);
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      
+      if (diffMins < 1) return 'just now';
+      if (diffMins < 60) return `${diffMins}m ago`;
+      
+      const diffHours = Math.floor(diffMins / 60);
+      if (diffHours < 24) return `${diffHours}h ago`;
+      
+      return date.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return 'recently';
+    }
+  };
+
+  useEffect(() => {
+    setTargetUserProfile(null);
+    setIsTargetUserOnline(false);
+    if (!selectedChat || !isSupabaseConfigured || !supabase) return;
+    const chatIsRoom = 'type' in selectedChat;
+    const isDirect = !chatIsRoom || (selectedChat as ChatRoom).type === 'direct';
+    if (!isDirect) return;
+    
+    const otherId = chatIsRoom 
+      ? (selectedChat as ChatRoom).members.find(m => m !== currentUser.id) || (selectedChat as ChatRoom).creatorId
+      : (selectedChat as User).id;
+      
+    if (!otherId) return;
+
+    const fetchProfile = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('id, name, username, avatar, last_seen')
+          .eq('id', otherId)
+          .maybeSingle();
+        if (data) {
+          setTargetUserProfile(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch target user profile:', err);
+      }
+    };
+
+    fetchProfile();
+    const interval = setInterval(fetchProfile, 10000);
+    return () => clearInterval(interval);
+  }, [selectedChat, currentUser.id]);
 
   // ─────────────────────────────────────────────
   // External activeChatUserId
@@ -977,11 +1053,32 @@ export default function MessagesScreen({
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream);
+      
+      // Determine the best MIME type supported by the current browser
+      let mimeType = 'audio/webm;codecs=opus';
+      if (typeof MediaRecorder !== 'undefined') {
+        const candidates = [
+          'audio/webm;codecs=opus',
+          'audio/webm',
+          'audio/ogg;codecs=opus',
+          'audio/mp4',
+          'audio/aac',
+          'audio/wav'
+        ];
+        const supported = candidates.find(type => MediaRecorder.isTypeSupported(type));
+        if (supported) mimeType = supported;
+      }
+
+      const options = {
+        mimeType,
+        audioBitsPerSecond: 64000 // 64kbps is extremely clear for voice but highly compressed (instant upload)
+      };
+
+      const mr = new MediaRecorder(stream, options);
       audioChunksRef.current = [];
       mr.ondataavailable = e => audioChunksRef.current.push(e.data);
       mr.onstop = () => {
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const blob = new Blob(audioChunksRef.current, { type: mr.mimeType || 'audio/webm' });
         setAudioPreviewUrl(URL.createObjectURL(blob));
         setIsAudioPreviewMode(true);
         stream.getTracks().forEach(t => t.stop());
@@ -992,7 +1089,10 @@ export default function MessagesScreen({
       setRecordingDuration(0);
       recordingTimerRef.current = setInterval(() => setRecordingDuration(d => d + 1), 1000);
       waveIntervalRef.current = setInterval(() => setRecordingWaves([...Array(12)].map(() => Math.random() * 30 + 8)), 200);
-    } catch { alert('Microphone permission denied.'); }
+    } catch (err) {
+      console.error('Microphone capture failed:', err);
+      alert('Could not access microphone. Please check permissions.');
+    }
   };
 
   const stopRecording = () => {
@@ -1004,16 +1104,36 @@ export default function MessagesScreen({
 
   const sendAudioMessage = async () => {
     if (!audioPreviewUrl || !isSupabaseConfigured || !supabase) return;
-    const resp = await fetch(audioPreviewUrl);
-    const blob = await resp.blob();
-    const path = `voice/${currentUser.id}/${Date.now()}.webm`;
-    const { error } = await supabase.storage.from('messages-media').upload(path, blob, { contentType: 'audio/webm' });
-    if (error) { console.error('[Messages] audio upload:', error); return; }
-    const { data: urlData } = supabase.storage.from('messages-media').getPublicUrl(path);
-    await sendMessage({ mediaUrl: urlData.publicUrl, mediaType: 'audio' });
-    setAudioPreviewUrl(null);
-    setIsAudioPreviewMode(false);
-    setRecordingDuration(0);
+    try {
+      const resp = await fetch(audioPreviewUrl);
+      const blob = await resp.blob();
+      
+      // Determine extension based on blob type
+      let ext = 'webm';
+      if (blob.type.includes('mp4')) ext = 'mp4';
+      else if (blob.type.includes('ogg')) ext = 'ogg';
+      else if (blob.type.includes('wav')) ext = 'wav';
+      else if (blob.type.includes('aac')) ext = 'aac';
+      else if (blob.type.includes('m4a')) ext = 'm4a';
+
+      const path = `voice/${currentUser.id}/${Date.now()}.${ext}`;
+      const { error } = await supabase.storage.from('messages-media').upload(path, blob, { contentType: blob.type });
+      
+      if (error) {
+        console.error('[Messages] audio upload failed:', error);
+        alert(`Failed to upload voice message: ${error.message}. Make sure the 'messages-media' storage bucket policy is updated in Supabase.`);
+        return;
+      }
+      
+      const { data: urlData } = supabase.storage.from('messages-media').getPublicUrl(path);
+      await sendMessage({ mediaUrl: urlData.publicUrl, mediaType: 'audio' });
+      setAudioPreviewUrl(null);
+      setIsAudioPreviewMode(false);
+      setRecordingDuration(0);
+    } catch (err: any) {
+      console.error('[Messages] sendAudioMessage error:', err);
+      alert(`Error sending voice message: ${err?.message || err}`);
+    }
   };
 
   // ─────────────────────────────────────────────
@@ -1399,10 +1519,25 @@ export default function MessagesScreen({
                     return s && s.count > 0 ? <span className="text-xs font-black text-orange-400 flex items-center gap-0.5"><Flame className="w-3 h-3" />{s.count}</span> : null;
                   })()}
                 </div>
-                <p className="text-xs text-stone-500 truncate">
-                  {Object.values(typingUsers).length > 0
-                    ? <span className="text-violet-400 animate-pulse">typing...</span>
-                    : isRoom && (selectedChat as ChatRoom).type !== 'direct' ? `${(selectedChat as ChatRoom).members.length} members` : `@${isRoom ? (selectedChat as ChatRoom).description?.replace('@', '') : (selectedChat as User).username}`}
+                <p className="text-xs text-stone-500 truncate flex items-center gap-1">
+                  {Object.values(typingUsers).length > 0 ? (
+                    <span className="text-violet-400 animate-pulse font-medium">typing...</span>
+                  ) : isRoom && (selectedChat as ChatRoom).type !== 'direct' ? (
+                    `${(selectedChat as ChatRoom).members.length} members`
+                  ) : isDirect ? (
+                    isTargetUserOnline ? (
+                      <span className="text-emerald-400 flex items-center gap-1 font-medium">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        Online
+                      </span>
+                    ) : targetUserProfile?.last_seen ? (
+                      `Last seen ${formatLastSeen(targetUserProfile.last_seen)}`
+                    ) : (
+                      `@${isRoom ? (selectedChat as ChatRoom).description?.replace('@', '') : (selectedChat as User).username}`
+                    )
+                  ) : (
+                    `@${isRoom ? (selectedChat as ChatRoom).description?.replace('@', '') : (selectedChat as User).username}`
+                  )}
                 </p>
               </div>
               <div className="flex items-center gap-1">
@@ -1574,7 +1709,15 @@ export default function MessagesScreen({
                         )}
                         <div className="flex items-center justify-end gap-1 mt-0.5">
                           <span className={`text-[10px] ${me ? 'text-white/50' : 'text-stone-600'}`}>{formatTime(msg.createdAt)}</span>
-                          {me && (msg.isRead ? <CheckCheck className="w-3 h-3 text-blue-300" /> : <Check className="w-3 h-3 text-white/40" />)}
+                          {me && (
+                            msg.isRead ? (
+                              <CheckCheck className="w-3.5 h-3.5 text-sky-400" />
+                            ) : msg.isDelivered ? (
+                              <CheckCheck className="w-3.5 h-3.5 text-stone-500" />
+                            ) : (
+                              <Check className="w-3.5 h-3.5 text-stone-500" />
+                            )
+                          )}
                           {msg.isE2EE && <Lock className="w-2.5 h-2.5 opacity-40" />}
                           {msg.isPinned && <Pin className="w-2.5 h-2.5 text-amber-400" />}
                         </div>

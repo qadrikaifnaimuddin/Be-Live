@@ -136,6 +136,26 @@ export default function App() {
     }
   }, []);
 
+  // Update last_seen timestamp periodically to show active status
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase || !currentUser?.id) return;
+
+    const updateLastSeen = async () => {
+      try {
+        await supabase
+          .from('profiles')
+          .update({ last_seen: new Date().toISOString() })
+          .eq('id', currentUser.id);
+      } catch (err) {
+        console.error('Failed to update last_seen:', err);
+      }
+    };
+
+    updateLastSeen();
+    const interval = setInterval(updateLastSeen, 20000);
+    return () => clearInterval(interval);
+  }, [currentUser?.id]);
+
   const handleLoginSuccess = (user: User) => {
     setCurrentUser(user);
     localStorage.setItem('be_live_current_user', JSON.stringify(user));

@@ -58,6 +58,7 @@ export interface Message {
   isE2EE: boolean;
   createdAt: string;
   isRead?: boolean;
+  isDelivered?: boolean;
   
   // Snapchat-like disappearing features
   isDisappearing?: boolean;
