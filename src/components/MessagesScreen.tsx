@@ -404,20 +404,37 @@ export default function MessagesScreen({
     try {
       // 1. Check if direct room already exists (fetch user's direct rooms and filter in JS for absolute reliability)
       console.log('[ensureDirectRoom] Querying chat_rooms for user:', currentUser.id);
-      const { data: existing, error: findError } = await supabase
+
+      let existing = null;
+      const findAttempt1 = await supabase
         .from('chat_rooms')
         .select('id, name, type, avatar, members, last_message, last_message_time, creator_id, admin_ids, allow_anonymous, description, created_at, deleted_by')
         .eq('type', 'direct')
         .contains('members', [currentUser.id]);
 
-      if (findError) {
-        console.error('[ensureDirectRoom] Query chat_rooms error:', findError);
-        throw findError;
+      if (findAttempt1.error && findAttempt1.error.message.includes('deleted_by')) {
+        console.warn('[ensureDirectRoom] deleted_by missing on chat_rooms, retrying without it...');
+        const findAttempt2 = await supabase
+          .from('chat_rooms')
+          .select('id, name, type, avatar, members, last_message, last_message_time, creator_id, admin_ids, allow_anonymous, description, created_at')
+          .eq('type', 'direct')
+          .contains('members', [currentUser.id]);
+        if (findAttempt2.error) {
+          console.error('[ensureDirectRoom] Query chat_rooms error:', findAttempt2.error);
+          throw findAttempt2.error;
+        }
+        existing = findAttempt2.data?.map((r: any) => ({ ...r, deleted_by: [] }));
+      } else {
+        if (findAttempt1.error) {
+          console.error('[ensureDirectRoom] Query chat_rooms error:', findAttempt1.error);
+          throw findAttempt1.error;
+        }
+        existing = findAttempt1.data;
       }
       
       console.log('[ensureDirectRoom] Existing direct rooms containing user:', existing?.length);
-      const foundRoom = existing?.find(r => r.members && r.members.includes(targetUserId));
-      console.log('[ensureDirectRoom] Matching room found:', foundRoom);
+      const foundRoom = existing?.find((r: any) => r.members && r.members.includes(targetUserId));
+      console.log('[ensureDirectRoom] Matching room found:', foundRoom?.id);
 
       if (foundRoom) {
         if (foundRoom.deleted_by && foundRoom.deleted_by.includes(currentUser.id)) {
@@ -534,19 +551,40 @@ export default function MessagesScreen({
     }
     try {
       console.log('[loadRooms] Fetching rooms for user:', currentUser.id);
-      const { data, error } = await supabase
+
+      // Two-attempt pattern: try with deleted_by first, fall back without it
+      let roomData = null;
+      let roomErr = null;
+
+      const roomAttempt1 = await supabase
         .from('chat_rooms')
         .select('id, name, type, avatar, members, last_message, last_message_time, creator_id, admin_ids, allow_anonymous, description, created_at, deleted_by')
         .contains('members', [currentUser.id])
         .order('last_message_time', { ascending: false, nullsFirst: false })
         .limit(50);
-      if (error) {
-        console.error('[loadRooms] Query chat_rooms error:', error);
-        throw error;
+
+      if (roomAttempt1.error && roomAttempt1.error.message.includes('deleted_by')) {
+        console.warn('[loadRooms] deleted_by missing on chat_rooms, retrying without it...');
+        const roomAttempt2 = await supabase
+          .from('chat_rooms')
+          .select('id, name, type, avatar, members, last_message, last_message_time, creator_id, admin_ids, allow_anonymous, description, created_at')
+          .contains('members', [currentUser.id])
+          .order('last_message_time', { ascending: false, nullsFirst: false })
+          .limit(50);
+        roomData = roomAttempt2.data?.map((r: any) => ({ ...r, deleted_by: [] })) ?? null;
+        roomErr = roomAttempt2.error;
+      } else {
+        roomData = roomAttempt1.data;
+        roomErr = roomAttempt1.error;
+      }
+
+      if (roomErr) {
+        console.error('[loadRooms] Query chat_rooms error:', roomErr);
+        throw roomErr;
       }
       
-      console.log('[loadRooms] Fetched chat_rooms:', data?.length);
-      const parsedRooms = (data || []).map(dbRowToRoom);
+      console.log('[loadRooms] Fetched chat_rooms:', roomData?.length);
+      const parsedRooms = (roomData || []).map(dbRowToRoom);
 
       // Fetch profiles for other members in direct rooms to show correct name and avatar dynamically
       const directRooms = parsedRooms.filter(r => r.type === 'direct');
