@@ -396,27 +396,40 @@ export default function MessagesScreen({
   };
 
   const ensureDirectRoom = async (targetUserId: string): Promise<ChatRoom | null> => {
-    if (!isSupabaseConfigured || !supabase || !currentUser?.id) return null;
+    console.log('[ensureDirectRoom] Called with targetUserId:', targetUserId);
+    if (!isSupabaseConfigured || !supabase || !currentUser?.id) {
+      console.warn('[ensureDirectRoom] Missing client configs or user session:', { isSupabaseConfigured, hasSupabase: !!supabase, currentUserId: currentUser?.id });
+      return null;
+    }
     try {
       // 1. Check if direct room already exists (fetch user's direct rooms and filter in JS for absolute reliability)
+      console.log('[ensureDirectRoom] Querying chat_rooms for user:', currentUser.id);
       const { data: existing, error: findError } = await supabase
         .from('chat_rooms')
         .select('id, name, type, avatar, members, last_message, last_message_time, creator_id, admin_ids, allow_anonymous, description, created_at, deleted_by')
         .eq('type', 'direct')
         .contains('members', [currentUser.id]);
 
-      if (findError) throw findError;
+      if (findError) {
+        console.error('[ensureDirectRoom] Query chat_rooms error:', findError);
+        throw findError;
+      }
       
+      console.log('[ensureDirectRoom] Existing direct rooms containing user:', existing?.length);
       const foundRoom = existing?.find(r => r.members && r.members.includes(targetUserId));
+      console.log('[ensureDirectRoom] Matching room found:', foundRoom);
+
       if (foundRoom) {
         if (foundRoom.deleted_by && foundRoom.deleted_by.includes(currentUser.id)) {
           const updatedDeletedBy = foundRoom.deleted_by.filter((id: string) => id !== currentUser.id);
+          console.log('[ensureDirectRoom] Restoring soft-deleted room. New deleted_by:', updatedDeletedBy);
           await supabase.from('chat_rooms').update({ deleted_by: updatedDeletedBy }).eq('id', foundRoom.id);
         }
         return dbRowToRoom(foundRoom);
       }
 
       // 2. Fetch other user's profile to get name and avatar for room creation
+      console.log('[ensureDirectRoom] Fetching profile for other user ID:', targetUserId);
       const { data: otherProfile } = await supabase
         .from('profiles')
         .select('username, name, avatar')
@@ -427,6 +440,7 @@ export default function MessagesScreen({
       const otherAvatar = otherProfile?.avatar || '';
 
       // 3. Create the direct room
+      console.log('[ensureDirectRoom] Inserting new direct room with members:', [currentUser.id, targetUserId]);
       const { data: newRoomData, error: createError } = await supabase
         .from('chat_rooms')
         .insert({
@@ -442,7 +456,11 @@ export default function MessagesScreen({
         .select()
         .single();
 
-      if (createError) throw createError;
+      if (createError) {
+        console.error('[ensureDirectRoom] Insert chat_rooms error:', createError);
+        throw createError;
+      }
+      console.log('[ensureDirectRoom] Successfully inserted direct room:', newRoomData);
       if (newRoomData) {
         const newRoom = dbRowToRoom(newRoomData);
         // Add to local rooms state so it shows up in sidebar immediately
@@ -510,16 +528,24 @@ export default function MessagesScreen({
   // Load chat rooms
   // ─────────────────────────────────────────────
   const loadRooms = useCallback(async () => {
-    if (!isSupabaseConfigured || !supabase) return;
+    if (!isSupabaseConfigured || !supabase || !currentUser?.id) {
+      console.warn('[loadRooms] Missing client configs or user session:', { isSupabaseConfigured, hasSupabase: !!supabase, currentUserId: currentUser?.id });
+      return;
+    }
     try {
+      console.log('[loadRooms] Fetching rooms for user:', currentUser.id);
       const { data, error } = await supabase
         .from('chat_rooms')
         .select('id, name, type, avatar, members, last_message, last_message_time, creator_id, admin_ids, allow_anonymous, description, created_at, deleted_by')
         .contains('members', [currentUser.id])
         .order('last_message_time', { ascending: false, nullsFirst: false })
         .limit(50);
-      if (error) throw error;
+      if (error) {
+        console.error('[loadRooms] Query chat_rooms error:', error);
+        throw error;
+      }
       
+      console.log('[loadRooms] Fetched chat_rooms:', data?.length);
       const parsedRooms = (data || []).map(dbRowToRoom);
 
       // Fetch profiles for other members in direct rooms to show correct name and avatar dynamically
@@ -552,12 +578,18 @@ export default function MessagesScreen({
       }
 
       // Fetch legacy messages where room_id is null and user is involved
-      const { data: legacyMessages } = await supabase
+      console.log('[loadRooms] Fetching legacy messages...');
+      const { data: legacyMessages, error: legacyErr } = await supabase
         .from('messages')
         .select('id, text, created_at, sender_id, receiver_id, media_type, is_sticker, is_doodle, deleted_by')
         .is('room_id', null)
         .or(`sender_id.eq.${currentUser.id},receiver_id.eq.${currentUser.id}`)
         .order('created_at', { ascending: false });
+
+      if (legacyErr) {
+        console.error('[loadRooms] Query legacy messages error:', legacyErr);
+      }
+      console.log('[loadRooms] Legacy messages count:', legacyMessages?.length);
 
       const legacyGroups: Record<string, { text: string; time: string; count: number; deletedBy: string[] }> = {};
       if (legacyMessages) {
@@ -590,13 +622,19 @@ export default function MessagesScreen({
           .filter(Boolean)
       );
 
+      console.log('[loadRooms] legacyGroups constructed:', legacyGroups);
       const missingUserIds = Object.keys(legacyGroups).filter(uid => !existingDirectUserIds.has(uid));
+      console.log('[loadRooms] missingUserIds from direct rooms list:', missingUserIds);
       if (missingUserIds.length > 0) {
-        const { data: missingProfiles } = await supabase
+        const { data: missingProfiles, error: profErr } = await supabase
           .from('profiles')
           .select('id, name, username, avatar, last_seen')
           .in('id', missingUserIds);
           
+        if (profErr) {
+          console.error('[loadRooms] Query missing profiles error:', profErr);
+        }
+        console.log('[loadRooms] Fetched missing profiles:', missingProfiles?.length);
         if (missingProfiles) {
           missingProfiles.forEach(prof => {
             const leg = legacyGroups[prof.id];
@@ -631,6 +669,7 @@ export default function MessagesScreen({
       });
 
       const activeRooms = parsedRooms.filter(r => !r.deletedBy || !r.deletedBy.includes(currentUser.id));
+      console.log('[loadRooms] final activeRooms constructed:', activeRooms);
       setRooms(activeRooms);
     } catch (err) {
       console.error('[Messages] loadRooms:', err);
