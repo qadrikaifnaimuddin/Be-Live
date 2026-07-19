@@ -1029,7 +1029,7 @@ export default function ProfileScreen({
   const [connectionsSearch, setConnectionsSearch] = useState('');
 
   const isOwnProfile = user.id === currentUser.id;
-  const isFollowing = currentUser.following.includes(user.id);
+  const isFollowing = currentUser.following?.includes(user.id) || false;
   const isAccountPrivateAndNotFollowing = !isOwnProfile && user.isPrivate && !isFollowing;
 
   // Settings modal states
@@ -2965,7 +2965,7 @@ export default function ProfileScreen({
           userId={isOwnProfile ? currentUser.id : user.id}
           mode={connectionsModalType}
           currentUserId={currentUser.id}
-          isFollowing={(id) => currentUser.following.includes(id)}
+          isFollowing={(id) => currentUser.following?.includes(id) || false}
           onFollow={async (id) => { onToggleFollow(id); }}
           onUnfollow={async (id) => { onToggleFollow(id); }}
           onClose={() => setConnectionsModalType(null)}

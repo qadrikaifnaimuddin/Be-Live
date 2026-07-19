@@ -157,7 +157,12 @@ export default function App() {
     const storedCurrentUser = localStorage.getItem('be_live_current_user');
     if (storedCurrentUser) {
       try {
-        setCurrentUser(JSON.parse(storedCurrentUser));
+        const parsed = JSON.parse(storedCurrentUser);
+        if (parsed) {
+          if (!parsed.followers) parsed.followers = [];
+          if (!parsed.following) parsed.following = [];
+        }
+        setCurrentUser(parsed);
       } catch (e) {
         console.error('Failed to parse current user:', e);
         localStorage.removeItem('be_live_current_user');
