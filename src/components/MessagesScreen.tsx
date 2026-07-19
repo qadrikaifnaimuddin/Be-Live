@@ -1113,16 +1113,26 @@ export default function MessagesScreen({
   // External activeChatUserId
   // ─────────────────────────────────────────────
   useEffect(() => {
+    if (!currentUser?.id || !isSupabaseConfigured || !supabase) return;
+    
     const targetId = activeChatUserId || localStorage.getItem('be_live_active_dm_target');
-    if (!targetId || !isSupabaseConfigured || !supabase) return;
+    if (!targetId) return;
+
+    console.log('[activeChatUserId useEffect] Executing ensureDirectRoom for:', targetId);
+    
+    // Clear immediately to prevent repeat executions on subsequent renders
     localStorage.removeItem('be_live_active_dm_target');
+    if (activeChatUserId) {
+      onClearActiveChatUser?.();
+    }
+
     ensureDirectRoom(targetId).then(room => {
+      console.log('[activeChatUserId useEffect] ensureDirectRoom result:', room);
       if (room) {
         setSelectedChat(room);
       }
-      onClearActiveChatUser?.();
     });
-  }, [activeChatUserId, onClearActiveChatUser]);
+  }, [activeChatUserId, currentUser?.id, isSupabaseConfigured, supabase, onClearActiveChatUser]);
 
   // ─────────────────────────────────────────────
   // Load streaks
