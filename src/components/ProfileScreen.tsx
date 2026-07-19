@@ -350,7 +350,7 @@ function MiniPostPreview({ post, isPlaying, onPlayToggle, onLike, liked, onView 
 export default function ProfileScreen({
   user,
   currentUser,
-  posts,
+  posts = [],
   allPosts = [],
   stories,
   highlights,

@@ -634,6 +634,7 @@ export default function App() {
               <ProfileScreen
                 user={currentUser}
                 currentUser={currentUser}
+                posts={[]}
                 stories={stories}
                 highlights={highlights}
                 onAddHighlight={handleAddHighlight}
