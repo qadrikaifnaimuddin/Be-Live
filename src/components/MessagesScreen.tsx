@@ -2060,22 +2060,39 @@ export default function MessagesScreen({
                         <Phone className="w-4 h-4" />
                       </button>
                       {showCallMenu && (
-                        <div className="absolute right-0 top-full mt-2 w-36 bg-stone-900 border border-stone-800 rounded-2xl p-1.5 shadow-2xl z-30 flex flex-col gap-1">
-                          <button
-                            onClick={() => { onStartCall?.(directTargetUser, 'audio'); setShowCallMenu(false); }}
-                            className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-stone-300 hover:text-white hover:bg-stone-800 rounded-xl cursor-pointer transition-colors"
-                          >
-                            <Phone className="w-3.5 h-3.5 text-emerald-400" />
-                            Voice Call
-                          </button>
-                          <button
-                            onClick={() => { onStartCall?.(directTargetUser, 'video'); setShowCallMenu(false); }}
-                            className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-stone-300 hover:text-white hover:bg-stone-800 rounded-xl cursor-pointer transition-colors"
-                          >
-                            <Video className="w-3.5 h-3.5 text-blue-400" />
-                            Video Call
-                          </button>
-                        </div>
+                        <>
+                          {/* Invisible full-screen backdrop to close menu on outside click */}
+                          <div
+                            className="fixed inset-0 z-20"
+                            onClick={() => setShowCallMenu(false)}
+                          />
+                          <div className="absolute right-0 top-full mt-2 w-40 bg-stone-900 border border-stone-700 rounded-2xl p-1.5 shadow-2xl z-30 flex flex-col gap-1">
+                            <button
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                onStartCall?.(directTargetUser, 'audio');
+                                setShowCallMenu(false);
+                              }}
+                              className="flex items-center gap-2 px-3 py-2.5 text-sm font-semibold text-stone-300 hover:text-white hover:bg-stone-800 rounded-xl cursor-pointer transition-colors w-full text-left"
+                            >
+                              <Phone className="w-4 h-4 text-emerald-400 shrink-0" />
+                              Voice Call
+                            </button>
+                            <button
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                onStartCall?.(directTargetUser, 'video');
+                                setShowCallMenu(false);
+                              }}
+                              className="flex items-center gap-2 px-3 py-2.5 text-sm font-semibold text-stone-300 hover:text-white hover:bg-stone-800 rounded-xl cursor-pointer transition-colors w-full text-left"
+                            >
+                              <Video className="w-4 h-4 text-blue-400 shrink-0" />
+                              Video Call
+                            </button>
+                          </div>
+                        </>
                       )}
                     </div>
                   )}
