@@ -579,12 +579,33 @@ export default function MessagesScreen({
 
       // Fetch legacy messages where room_id is null and user is involved
       console.log('[loadRooms] Fetching legacy messages...');
-      const { data: legacyMessages, error: legacyErr } = await supabase
+      let legacyMessages = null;
+      let legacyErr = null;
+
+      const firstAttempt = await supabase
         .from('messages')
         .select('id, text, created_at, sender_id, receiver_id, media_type, is_sticker, is_doodle, deleted_by')
         .is('room_id', null)
         .or(`sender_id.eq.${currentUser.id},receiver_id.eq.${currentUser.id}`)
         .order('created_at', { ascending: false });
+
+      if (firstAttempt.error && firstAttempt.error.message.includes('deleted_by')) {
+        console.warn('[loadRooms] deleted_by column missing on messages table. Retrying query without deleted_by...');
+        const secondAttempt = await supabase
+          .from('messages')
+          .select('id, text, created_at, sender_id, receiver_id, media_type, is_sticker, is_doodle')
+          .is('room_id', null)
+          .or(`sender_id.eq.${currentUser.id},receiver_id.eq.${currentUser.id}`)
+          .order('created_at', { ascending: false });
+
+        if (secondAttempt.data) {
+          legacyMessages = secondAttempt.data.map((m: any) => ({ ...m, deleted_by: [] }));
+        }
+        legacyErr = secondAttempt.error;
+      } else {
+        legacyMessages = firstAttempt.data;
+        legacyErr = firstAttempt.error;
+      }
 
       if (legacyErr) {
         console.error('[loadRooms] Query legacy messages error:', legacyErr);
