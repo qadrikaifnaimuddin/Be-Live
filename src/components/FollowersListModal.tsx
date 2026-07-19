@@ -14,6 +14,7 @@ interface ListUser {
   username: string;
   name: string;
   avatar: string;
+  isPrivate?: boolean;
 }
 
 interface FollowersListModalProps {
@@ -51,10 +52,20 @@ export default function FollowersListModal({
           const ids = data.map((r: any) => r.follower_id);
           const { data: profiles } = await supabase
             .from('profiles')
-            .select('id, username, name, avatar')
+            .select('id, username, name, avatar, is_private')
             .in('id', ids)
             .limit(500);
-          setUsers(profiles || []);
+          if (profiles) {
+            setUsers(profiles.map((p: any) => ({
+              id: p.id,
+              username: p.username,
+              name: p.name,
+              avatar: p.avatar,
+              isPrivate: p.is_private,
+            })));
+          } else {
+            setUsers([]);
+          }
         } else {
           // People that `userId` follows
           const { data } = await supabase
@@ -66,10 +77,20 @@ export default function FollowersListModal({
           const ids = data.map((r: any) => r.target_id);
           const { data: profiles } = await supabase
             .from('profiles')
-            .select('id, username, name, avatar')
+            .select('id, username, name, avatar, is_private')
             .in('id', ids)
             .limit(500);
-          setUsers(profiles || []);
+          if (profiles) {
+            setUsers(profiles.map((p: any) => ({
+              id: p.id,
+              username: p.username,
+              name: p.name,
+              avatar: p.avatar,
+              isPrivate: p.is_private,
+            })));
+          } else {
+            setUsers([]);
+          }
         }
       } finally {
         setLoading(false);
@@ -82,7 +103,7 @@ export default function FollowersListModal({
     setLoadingIds(prev => new Set([...prev, user.id]));
     try {
       if (isFollowing(user.id)) await onUnfollow(user.id);
-      else await onFollow(user.id, false);
+      else await onFollow(user.id, user.isPrivate || false);
     } finally {
       setLoadingIds(prev => { const n = new Set(prev); n.delete(user.id); return n; });
     }

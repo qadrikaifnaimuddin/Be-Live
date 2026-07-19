@@ -8,7 +8,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft, UserPlus, UserCheck, MessageCircle, Lock,
-  Loader2, BadgeCheck, Grid3X3, Users, Clock
+  Loader2, BadgeCheck, Users, Clock
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 import { User } from '../types';
@@ -83,20 +83,6 @@ export default function UserProfilePage({
         .eq('id', p.id)
         .maybeSingle();
 
-      // Fetch posts count
-      const { count: postsCount } = await supabase
-        .from('posts')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', p.id);
-
-      // Fetch recent posts (grid)
-      const { data: postsData } = await supabase
-        .from('posts')
-        .select('id, image_url, created_at')
-        .eq('user_id', p.id)
-        .order('created_at', { ascending: false })
-        .limit(18);
-
       setProfile({
         id: p.id,
         username: p.username,
@@ -106,14 +92,10 @@ export default function UserProfilePage({
         isPrivate: p.is_private || false,
         followersCount: stats?.followers_count ?? 0,
         followingCount: stats?.following_count ?? 0,
-        postsCount: postsCount ?? 0,
+        postsCount: 0,
       });
 
-      setPosts((postsData || []).map((post: any) => ({
-        id: post.id,
-        imageUrl: post.image_url || '',
-        createdAt: post.created_at,
-      })));
+      setPosts([]);
 
       setLoading(false);
     };
@@ -271,38 +253,13 @@ export default function UserProfilePage({
           <div className="flex flex-col items-center justify-center py-16 text-center border border-stone-800 rounded-2xl">
             <Lock className="w-12 h-12 text-stone-700 mb-4" />
             <p className="font-black text-stone-300 text-base">This account is private</p>
-            <p className="text-stone-500 text-sm mt-1">Follow to see their posts</p>
+            <p className="text-stone-500 text-sm mt-1">Follow to see their stories & highlights</p>
           </div>
         ) : (
           <>
-            {/* Posts grid */}
-            <div className="border-t border-stone-800 pt-4">
-              <div className="flex items-center gap-2 mb-4">
-                <Grid3X3 className="w-4 h-4 text-stone-400" />
-                <span className="text-xs font-bold text-stone-400 uppercase tracking-widest">Posts</span>
-              </div>
-
-              {posts.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 text-center">
-                  <Grid3X3 className="w-10 h-10 text-stone-800 mb-3" />
-                  <p className="text-stone-500 font-bold text-sm">No posts yet</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-3 gap-0.5">
-                  {posts.map(post => (
-                    <div key={post.id} className="aspect-square bg-stone-900 overflow-hidden">
-                      {post.imageUrl ? (
-                        <img src={post.imageUrl} alt="" className="w-full h-full object-cover hover:opacity-90 transition-opacity cursor-pointer" />
-                      ) : (
-                        <div className="w-full h-full bg-stone-800 flex items-center justify-center">
-                          <Grid3X3 className="w-6 h-6 text-stone-700" />
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+          <div className="border-t border-stone-800 pt-8 pb-12 flex flex-col items-center justify-center text-center">
+            <p className="text-stone-500 font-bold text-sm">Stories & Highlights will appear here</p>
+          </div>
           </>
         )}
       </div>

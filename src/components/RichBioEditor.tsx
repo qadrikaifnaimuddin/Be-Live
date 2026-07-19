@@ -98,9 +98,102 @@ export default function RichBioEditor({ value, onChange, maxLength = 300 }: Rich
     updateStats();
   };
 
-  // Run rich text editing command
+  // Run rich text editing command using standard Range/Selection APIs
   const executeCommand = (command: string, arg: string = '') => {
-    document.execCommand(command, false, arg);
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+      // Fallback for compatibility/collapsed cursor
+      try {
+        document.execCommand(command, false, arg);
+      } catch (err) {
+        console.warn('[RichBioEditor] execCommand failed:', err);
+      }
+      handleEditorInput();
+      if (editorRef.current) {
+        editorRef.current.focus();
+      }
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+
+    const toggleStyleNode = (tagName: string) => {
+      let parent: HTMLElement | null = range.commonAncestorContainer as HTMLElement;
+      if (parent.nodeType === Node.TEXT_NODE) {
+        parent = parent.parentElement;
+      }
+      
+      const isStyled = parent && (parent.tagName.toLowerCase() === tagName || parent.closest(tagName));
+      
+      if (isStyled) {
+        const styledNode = (parent.tagName.toLowerCase() === tagName ? parent : parent.closest(tagName)) as HTMLElement;
+        if (styledNode && styledNode.parentNode) {
+          const fragment = document.createDocumentFragment();
+          while (styledNode.firstChild) {
+            fragment.appendChild(styledNode.firstChild);
+          }
+          styledNode.parentNode.replaceChild(fragment, styledNode);
+        }
+      } else {
+        const wrapper = document.createElement(tagName);
+        try {
+          range.surroundContents(wrapper);
+        } catch {
+          const content = range.extractContents();
+          wrapper.appendChild(content);
+          range.insertNode(wrapper);
+        }
+      }
+    };
+
+    const applySpanStyle = (styles: Record<string, string>) => {
+      const span = document.createElement('span');
+      Object.assign(span.style, styles);
+      try {
+        range.surroundContents(span);
+      } catch {
+        const content = range.extractContents();
+        span.appendChild(content);
+        range.insertNode(span);
+      }
+    };
+
+    try {
+      if (command === 'bold') {
+        toggleStyleNode('strong');
+      } else if (command === 'italic') {
+        toggleStyleNode('em');
+      } else if (command === 'underline') {
+        toggleStyleNode('u');
+      } else if (command === 'strikeThrough') {
+        toggleStyleNode('s');
+      } else if (command === 'fontName') {
+        applySpanStyle({ fontFamily: arg });
+      } else if (command === 'foreColor') {
+        applySpanStyle({ color: arg });
+      } else if (command === 'fontSize') {
+        const sizeMap: Record<string, string> = {
+          '1': '0.75rem',
+          '2': '0.875rem',
+          '3': '1rem',
+          '4': '1.125rem',
+          '5': '1.25rem',
+          '6': '1.5rem',
+          '7': '1.875rem',
+        };
+        applySpanStyle({ fontSize: sizeMap[arg] || '1rem' });
+      } else {
+        document.execCommand(command, false, arg);
+      }
+    } catch (e) {
+      console.warn('[RichBioEditor] execCommand fallback due to error:', e);
+      try {
+        document.execCommand(command, false, arg);
+      } catch (err) {
+        console.warn('[RichBioEditor] execCommand fallback failed:', err);
+      }
+    }
+
     handleEditorInput();
     if (editorRef.current) {
       editorRef.current.focus();
@@ -124,7 +217,12 @@ export default function RichBioEditor({ value, onChange, maxLength = 300 }: Rich
   const handlePaste = (e: React.ClipboardEvent) => {
     e.preventDefault();
     const text = e.clipboardData.getData('text/plain');
-    document.execCommand('insertText', false, text);
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    selection.deleteFromDocument();
+    selection.getRangeAt(0).insertNode(document.createTextNode(text));
+    selection.collapseToEnd();
+    handleEditorInput();
   };
 
   const loadPreset = (presetHtml: string) => {
@@ -394,7 +492,7 @@ export default function RichBioEditor({ value, onChange, maxLength = 300 }: Rich
           <span>Supports HTML formatting</span>
         </div>
         <div className="font-bold">
-          <span className={charCount > maxLength ? 'text-rose-450' : 'text-stone-400'}>
+          <span className={charCount > maxLength ? 'text-rose-500' : 'text-stone-400'}>
             {charCount}
           </span>
           <span className="text-stone-600"> / {maxLength}</span>

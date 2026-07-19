@@ -287,7 +287,7 @@ function ProfileMiniSheet({
               </button>
 
               <button
-                onClick={() => { onOpenDM(user.id); onClose(); }}
+                onClick={() => { onOpenDM(user.id); }}
                 className="flex-1 py-3 rounded-2xl text-sm font-bold bg-stone-800 hover:bg-stone-700 text-stone-200 transition-all cursor-pointer flex items-center justify-center gap-2"
               >
                 <MessageCircle className="w-4 h-4" />Message
@@ -394,11 +394,17 @@ export default function SearchScreen({
         return;
       }
 
+      const sanitized = q.replace(/[,()]/g, '');
+      if (!sanitized.trim()) {
+        setResults([]);
+        return;
+      }
+
       // Search by username prefix OR name (trigram similarity)
       const { data: profiles } = await supabase
         .from('profiles')
         .select('id, username, name, avatar, bio, is_private')
-        .or(`username.ilike.%${q}%,name.ilike.%${q}%`)
+        .or(`username.ilike.%${sanitized}%,name.ilike.%${sanitized}%`)
         .neq('id', currentUser.id)
         .limit(20);
 

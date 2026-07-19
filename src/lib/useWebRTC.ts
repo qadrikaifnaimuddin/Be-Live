@@ -37,6 +37,27 @@ const ICE_CONFIG: RTCConfiguration = {
   iceCandidatePoolSize: 10,
 };
 
+// ── Safe getUserMedia Helper ─────────────────────────────────────────
+const safeGetUserMedia = async (constraints: MediaStreamConstraints): Promise<MediaStream> => {
+  try {
+    return await navigator.mediaDevices.getUserMedia(constraints);
+  } catch (error) {
+    console.warn('[WebRTC] getUserMedia failed with constraints:', constraints, error);
+    if (constraints.video) {
+      try {
+        console.log('[WebRTC] Retrying with relaxed video constraints...');
+        return await navigator.mediaDevices.getUserMedia({
+          audio: constraints.audio,
+          video: true
+        });
+      } catch (retryError) {
+        console.warn('[WebRTC] Retry with video:true failed:', retryError);
+      }
+    }
+    throw error;
+  }
+};
+
 // ── Types ──────────────────────────────────────────────────────────
 export type CallStatus =
   | 'idle'        // no call
@@ -293,9 +314,9 @@ export function useWebRTC(
       if (!currentUserId || !supabase) return;
       try {
         // Get local media
-        const stream = await navigator.mediaDevices.getUserMedia({
+        const stream = await safeGetUserMedia({
           audio: true,
-          video: type === 'video' ? { width: 1280, height: 720 } : false,
+          video: type === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false,
         });
         localStreamRef.current = stream;
         if (localVideoRef.current && type === 'video') {
@@ -384,9 +405,9 @@ export function useWebRTC(
 
     try {
       const type = callTypeRef.current;
-      const stream = await navigator.mediaDevices.getUserMedia({
+      const stream = await safeGetUserMedia({
         audio: true,
-        video: type === 'video' ? { width: 1280, height: 720 } : false,
+        video: type === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false,
       });
       localStreamRef.current = stream;
       if (localVideoRef.current && type === 'video') {
@@ -566,7 +587,7 @@ export function useWebRTC(
     try {
       const nextFacing = facingModeRef.current === 'user' ? 'environment' : 'user';
       facingModeRef.current = nextFacing;
-      const newStream = await navigator.mediaDevices.getUserMedia({
+      const newStream = await safeGetUserMedia({
         video: { facingMode: nextFacing },
         audio: false,
       });
@@ -597,8 +618,8 @@ export function useWebRTC(
     try {
       if (state.isScreenSharing) {
         // Stop screen share — revert to camera
-        const cameraStream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 1280, height: 720 },
+        const cameraStream = await safeGetUserMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false,
         });
         const cameraTrack = cameraStream.getVideoTracks()[0];
@@ -637,8 +658,8 @@ export function useWebRTC(
     const stream = localStreamRef.current;
     if (!pc || !stream || state.callType === 'video') return;
     try {
-      const videoStream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 1280, height: 720 },
+      const videoStream = await safeGetUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false,
       });
       const videoTrack = videoStream.getVideoTracks()[0];

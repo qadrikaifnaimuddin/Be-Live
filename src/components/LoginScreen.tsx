@@ -797,7 +797,7 @@ export default function LoginScreen({
         const { error: verifyError } = await supabase.auth.verifyOtp({
           email: forgotResetEmail,
           token: forgotOtpToken.trim(),
-          type: 'email'
+          type: 'recovery'
         });
 
         if (verifyError) throw verifyError;

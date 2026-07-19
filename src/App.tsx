@@ -258,6 +258,60 @@ export default function App() {
     return () => clearInterval(interval);
   }, [currentUser?.id]);
 
+  // Load stories and highlights from Supabase
+  useEffect(() => {
+    if (!currentUser || !isSupabaseConfigured || !supabase) return;
+
+    const loadStoriesAndHighlights = async () => {
+      try {
+        // Fetch active stories (within 24 hours) or fetch all to allow highlights archival creation
+        const { data: storiesData } = await supabase
+          .from('stories')
+          .select('*, profiles(username, avatar)')
+          .order('created_at', { ascending: false });
+
+        if (storiesData) {
+          setStories(
+            storiesData.map((s: any) => ({
+              id: s.id,
+              userId: s.user_id,
+              username: s.profiles?.username || 'user',
+              userAvatar: s.profiles?.avatar || '',
+              mediaUrl: s.media_url,
+              mediaType: s.media_type,
+              caption: s.caption || '',
+              createdAt: s.created_at,
+              viewers: s.viewers || [],
+            }))
+          );
+        }
+
+        // Fetch story highlights
+        const { data: highlightsData } = await supabase
+          .from('story_highlights')
+          .select('*')
+          .eq('user_id', currentUser.id);
+
+        if (highlightsData) {
+          setHighlights(
+            highlightsData.map((h: any) => ({
+              id: h.id,
+              userId: h.user_id,
+              title: h.title,
+              coverUrl: h.cover_url || '',
+              storyIds: h.story_ids || [],
+              createdAt: new Date(h.created_at).toLocaleDateString(),
+            }))
+          );
+        }
+      } catch (err) {
+        console.error('[loadStoriesAndHighlights Error]:', err);
+      }
+    };
+
+    loadStoriesAndHighlights();
+  }, [currentUser?.id]);
+
   const handleLoginSuccess = (user: User) => {
     setCurrentUser(user);
     localStorage.setItem('be_live_current_user', JSON.stringify(user));
@@ -294,10 +348,11 @@ export default function App() {
   };
 
   // ProfileScreen Handlers
-  const handleAddHighlight = (title: string, coverUrl: string, storyIds: string[]) => {
+  const handleAddHighlight = async (title: string, coverUrl: string, storyIds: string[]) => {
     if (!currentUser) return;
+    const tempId = `highlight_${Date.now()}`;
     const newHighlight: Highlight = {
-      id: `highlight_${Date.now()}`,
+      id: tempId,
       userId: currentUser.id,
       title,
       coverUrl,
@@ -305,14 +360,114 @@ export default function App() {
       createdAt: 'Just now'
     };
     setHighlights(prev => [newHighlight, ...prev]);
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('story_highlights')
+          .insert({
+            user_id: currentUser.id,
+            title,
+            cover_url: coverUrl,
+            story_ids: storyIds
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+        if (data) {
+          setHighlights(prev => prev.map(h => h.id === tempId ? {
+            ...h,
+            id: data.id,
+            createdAt: new Date(data.created_at).toLocaleDateString()
+          } : h));
+        }
+      } catch (err) {
+        console.error('[handleAddHighlight Error]:', err);
+      }
+    }
   };
 
-  const handleDeleteStory = (storyId: string) => {
+  const handleDeleteStory = async (storyId: string) => {
     setStories(prev => prev.filter(s => s.id !== storyId));
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { error } = await supabase
+          .from('stories')
+          .delete()
+          .eq('id', storyId);
+        if (error) throw error;
+      } catch (err) {
+        console.error('[handleDeleteStory Error]:', err);
+      }
+    }
   };
 
-  const handleUpdateHighlight = (updatedHighlight: Highlight) => {
+  const handleUpdateHighlight = async (updatedHighlight: Highlight) => {
     setHighlights(prev => prev.map(h => h.id === updatedHighlight.id ? updatedHighlight : h));
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { error } = await supabase
+          .from('story_highlights')
+          .update({
+            title: updatedHighlight.title,
+            cover_url: updatedHighlight.coverUrl,
+            story_ids: updatedHighlight.storyIds
+          })
+          .eq('id', updatedHighlight.id);
+        if (error) throw error;
+      } catch (err) {
+        console.error('[handleUpdateHighlight Error]:', err);
+      }
+    }
+  };
+
+  const handleAddStory = async (mediaUrl: string, mediaType: 'image' | 'video', caption: string = '') => {
+    if (!currentUser) return;
+    const tempId = `story_${Date.now()}`;
+    const expiresAtDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const newStory: Story = {
+      id: tempId,
+      userId: currentUser.id,
+      username: currentUser.username,
+      userAvatar: currentUser.avatar,
+      mediaUrl,
+      mediaType,
+      caption,
+      createdAt: new Date().toISOString(),
+      viewers: []
+    };
+    setStories(prev => [newStory, ...prev]);
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('stories')
+          .insert({
+            user_id: currentUser.id,
+            media_url: mediaUrl,
+            media_type: mediaType,
+            caption: caption,
+            expires_at: expiresAtDate.toISOString()
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+        if (data) {
+          setStories(prev => prev.map(s => s.id === tempId ? {
+            ...s,
+            id: data.id,
+            createdAt: data.created_at,
+            expiresAt: data.expires_at
+          } : s));
+        }
+      } catch (err) {
+        console.error('[handleAddStory Error]:', err);
+      }
+    }
   };
 
   const handleToggleFollow = async (targetUserId: string) => {
@@ -361,6 +516,8 @@ export default function App() {
         username: updatedUser.username,
         is_private: updatedUser.isPrivate,
       };
+      if (updatedUser.avatarConfig !== undefined)
+        dbPayload.avatar_config = updatedUser.avatarConfig;
       // Persist lock timestamps if present
       if (updatedUser.usernameLastChangedAt !== undefined)
         dbPayload.username_last_changed_at = updatedUser.usernameLastChangedAt;
@@ -381,15 +538,22 @@ export default function App() {
     setCurrentUser(updatedUser);
     localStorage.setItem('be_live_current_user', JSON.stringify(updatedUser));
 
-    // Persist select fields to DB immediately (wallpapers, lock times)
+    // Persist select fields to DB immediately (wallpapers, lock times, avatar config)
     if (isSupabaseConfigured && supabase) {
       const dbFields: Record<string, any> = {};
+      if (updatedFields.avatar !== undefined)
+        dbFields.avatar = updatedFields.avatar;
+      if (updatedFields.avatarConfig !== undefined)
+        dbFields.avatar_config = updatedFields.avatarConfig;
       if (updatedFields.chatWallpaperPrefs !== undefined)
         dbFields.chat_wallpaper_prefs = updatedFields.chatWallpaperPrefs;
       if (updatedFields.usernameLastChangedAt !== undefined)
         dbFields.username_last_changed_at = updatedFields.usernameLastChangedAt;
       if (updatedFields.nameLastChangedAt !== undefined)
         dbFields.name_last_changed_at = updatedFields.nameLastChangedAt;
+      if (updatedFields.isAnonymousMode !== undefined)
+        dbFields.is_anonymous_mode = updatedFields.isAnonymousMode;
+
       if (Object.keys(dbFields).length > 0) {
         supabase.from('profiles').update(dbFields).eq('id', currentUser.id)
           .then(({ error }) => { if (error) console.error('[Supabase Settings Update]:', error.message); });
@@ -465,17 +629,15 @@ export default function App() {
               <ProfileScreen
                 user={currentUser}
                 currentUser={currentUser}
-                posts={posts}
                 stories={stories}
                 highlights={highlights}
                 onAddHighlight={handleAddHighlight}
                 onDeleteStory={handleDeleteStory}
                 onUpdateHighlight={handleUpdateHighlight}
+                onAddStory={handleAddStory}
                 onToggleFollow={handleToggleFollow}
                 onUpdateProfile={handleUpdateProfile}
                 onUpdateProfileSettings={handleUpdateProfileSettings}
-                onLikePost={handleLikePost}
-                onAddComment={handleAddComment}
                 onLogout={handleLogout}
                 onDeleteAccount={handleDeleteAccount}
                 onOpenMessages={handleOpenDM}

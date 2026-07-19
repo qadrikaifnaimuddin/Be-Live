@@ -139,24 +139,24 @@ export default function AvatarPicker({ currentAvatar, onAvatarSelect, onLaunchAv
   return (
     <div className="space-y-5 text-left">
       {/* ====== ACTIVE AVATAR PREVIEW & MASTER BUTTONS ====== */}
-      <div className="bg-slate-50/80 rounded-2xl p-4 border border-slate-200/60 flex items-center gap-4">
+      <div className="bg-stone-900/50 rounded-2xl p-4 border border-stone-800/50 flex items-center gap-4">
         <div className="relative shrink-0">
           <div className="p-1 rounded-full bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600 shadow-sm">
             <img
               src={currentAvatar}
               alt="Active profile pic"
               referrerPolicy="no-referrer"
-              className="w-16 h-16 rounded-full object-cover border-2 border-white bg-slate-100"
+              className="w-16 h-16 rounded-full object-cover border-2 border-stone-950 bg-stone-900"
             />
           </div>
-          <span className="absolute -bottom-1 -right-1 bg-purple-600 text-white p-1 rounded-full border border-white flex items-center justify-center text-[8px] font-extrabold shadow-md uppercase tracking-wider scale-90">
+          <span className="absolute -bottom-1 -right-1 bg-purple-600 text-white p-1 rounded-full border border-stone-950 flex items-center justify-center text-[8px] font-extrabold shadow-md uppercase tracking-wider scale-90">
             Live
           </span>
         </div>
 
         <div className="flex-1 space-y-1.5 min-w-0">
-          <h4 className="font-bold text-xs text-slate-800">Customize Your Face</h4>
-          <p className="text-[10px] text-slate-500 leading-tight">
+          <h4 className="font-bold text-xs text-stone-200">Customize Your Face</h4>
+          <p className="text-[10px] text-stone-400 leading-tight">
             Select a custom high-fidelity photo, upload any device snapshot, or create an avatar.
           </p>
           
@@ -165,7 +165,7 @@ export default function AvatarPicker({ currentAvatar, onAvatarSelect, onLaunchAv
               <button
                 type="button"
                 onClick={onLaunchAvatarStudio}
-                className="px-3 py-1 bg-stone-900 hover:bg-stone-800 text-white font-extrabold text-[10px] rounded-lg transition-all flex items-center gap-1 shadow-xs cursor-pointer"
+                className="px-3 py-1 bg-stone-900 hover:bg-stone-800 border border-stone-800/80 text-white font-extrabold text-[10px] rounded-lg transition-all flex items-center gap-1 shadow-xs cursor-pointer"
               >
                 <Sparkles className="w-3 h-3 text-amber-400" />
                 <span>Avatar Studio</span>
@@ -174,7 +174,7 @@ export default function AvatarPicker({ currentAvatar, onAvatarSelect, onLaunchAv
             <button
               type="button"
               onClick={triggerFileInput}
-              className="px-3 py-1 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-extrabold text-[10px] rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+              className="px-3 py-1 bg-stone-850 hover:bg-stone-800 text-stone-300 border border-stone-800/80 font-extrabold text-[10px] rounded-lg transition-all flex items-center gap-1 cursor-pointer"
             >
               <FolderOpen className="w-3 h-3 text-purple-500" />
               <span>Browse Device</span>
@@ -192,8 +192,8 @@ export default function AvatarPicker({ currentAvatar, onAvatarSelect, onLaunchAv
         onClick={triggerFileInput}
         className={`border-2 border-dashed rounded-2xl p-5 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-2 ${
           dragActive 
-            ? 'border-purple-500 bg-purple-50/50 scale-[0.99] shadow-inner' 
-            : 'border-slate-200 bg-white hover:border-purple-300 hover:bg-slate-50/30'
+            ? 'border-purple-500 bg-purple-950/20 scale-[0.99] shadow-inner' 
+            : 'border-stone-800 bg-stone-900/30 hover:border-purple-900/50 hover:bg-stone-800/30'
         }`}
       >
         <input
@@ -207,23 +207,23 @@ export default function AvatarPicker({ currentAvatar, onAvatarSelect, onLaunchAv
         {isUploading ? (
           <div className="flex flex-col items-center gap-1.5 py-4">
             <div className="w-6 h-6 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" />
-            <span className="text-xs font-bold text-slate-500">Compressing &amp; Uploading...</span>
+            <span className="text-xs font-bold text-stone-400">Compressing &amp; Uploading...</span>
           </div>
         ) : (
           <>
-            <div className={`p-2.5 rounded-full ${dragActive ? 'bg-purple-100 text-purple-600' : 'bg-slate-50 text-slate-400'}`}>
+            <div className={`p-2.5 rounded-full ${dragActive ? 'bg-purple-900/30 text-purple-400' : 'bg-stone-900 text-stone-500'}`}>
               <Upload className="w-5 h-5" />
             </div>
 
             <div className="space-y-0.5">
-              <span className="text-xs font-bold text-slate-700 block">Drag &amp; Drop Photo Here</span>
-              <span className="text-[10px] text-slate-400 block">or click to choose any image from your device</span>
+              <span className="text-xs font-bold text-stone-300 block">Drag &amp; Drop Photo Here</span>
+              <span className="text-[10px] text-stone-500 block">or click to choose any image from your device</span>
             </div>
           </>
         )}
 
         {uploadError && (
-          <span className="text-[10px] font-bold text-red-500 bg-red-50 px-3 py-1 rounded-full mt-1">
+          <span className="text-[10px] font-bold text-red-400 bg-red-950/20 px-3 py-1 rounded-full mt-1">
             ⚠️ {uploadError}
           </span>
         )}
@@ -232,7 +232,7 @@ export default function AvatarPicker({ currentAvatar, onAvatarSelect, onLaunchAv
       {/* ====== CHOOSE FROM PRESET PICTURE GALLERY ====== */}
       <div className="space-y-2">
         <div className="flex justify-between items-center">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Or Select a Premium Portrait</span>
+          <span className="text-[10px] font-bold uppercase tracking-wider text-stone-500">Or Select a Premium Portrait</span>
           
           {/* Category Tabs */}
           <div className="flex gap-1.5">
@@ -243,8 +243,8 @@ export default function AvatarPicker({ currentAvatar, onAvatarSelect, onLaunchAv
                 onClick={() => setActiveCategory(cat.category)}
                 className={`px-2 py-0.5 text-[9px] font-extrabold rounded-md transition-all cursor-pointer ${
                   activeCategory === cat.category 
-                    ? 'bg-purple-100 text-purple-700 font-bold' 
-                    : 'text-slate-400 hover:text-slate-600 bg-slate-50'
+                    ? 'bg-purple-950/50 text-purple-400 font-bold' 
+                    : 'text-stone-500 hover:text-stone-300 bg-stone-900/50'
                 }`}
               >
                 {cat.category.split(' & ')[0]}
@@ -254,7 +254,7 @@ export default function AvatarPicker({ currentAvatar, onAvatarSelect, onLaunchAv
         </div>
 
         {/* Portait selection Grid */}
-        <div className="bg-slate-50/50 border border-slate-200/50 rounded-2xl p-3 grid grid-cols-4 gap-2.5">
+        <div className="bg-stone-900/20 border border-stone-850/50 rounded-2xl p-3 grid grid-cols-4 gap-2.5">
           {PRESET_AVATARS.find(cat => cat.category === activeCategory)?.items.map((preset) => {
             const isSelected = currentAvatar === preset.url;
             return (

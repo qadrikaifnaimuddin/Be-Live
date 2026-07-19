@@ -49,6 +49,16 @@ export default function FollowButton({
       return;
     }
 
+    if (hasPendingRequest) {
+      setLoading(true);
+      try {
+        await onUnfollow(targetUserId);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     setLoading(true);
     try {
       await onFollow(targetUserId, targetIsPrivate);
@@ -62,16 +72,6 @@ export default function FollowButton({
     setLoading(true);
     try {
       await onUnfollow(targetUserId);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const cancelUnfollow = async () => {
-    setShowConfirm(false);
-    setLoading(true);
-    try {
-      await onUnfollow(targetUserId); // cancel pending request
     } finally {
       setLoading(false);
     }

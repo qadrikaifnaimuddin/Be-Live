@@ -9,7 +9,7 @@ const isSupabaseConfigured =
   !!supabaseUrl && 
   supabaseUrl !== "https://your-project-id.supabase.co" &&
   !!supabaseAnonKey &&
-  supabaseAnonKey !== "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...";
+  !supabaseAnonKey.includes("PLACEHOLDER");
 
 if (!isSupabaseConfigured) {
   console.warn(

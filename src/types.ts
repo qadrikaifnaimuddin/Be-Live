@@ -182,6 +182,7 @@ export interface Story {
   userAvatar: string;
   mediaUrl: string;
   mediaType: 'image' | 'video';
+  caption?: string;
   createdAt: string; // ISO string or simple age text
   viewers: string[]; // List of user IDs who viewed this story
 }

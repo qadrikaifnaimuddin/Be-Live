@@ -18,6 +18,9 @@ import {
 } from 'lucide-react';
 import { User, Message, CallSession, ChatRoom, Streak, Post, CallHistoryRecord } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
+import { DoodleCanvasModal } from './DoodleCanvasModal';
+import { ActiveCallOverlay } from './ActiveCallOverlay';
+
 
 // ─────────────────────────────────────────────
 // Types
@@ -284,10 +287,8 @@ export default function MessagesScreen({
   const [showComingSoon, setShowComingSoon] = useState<'audio' | 'video' | null>(null);
   const [showInputMenu, setShowInputMenu] = useState(false);
 
-  // ── E2EE ──
-  const [privateKey] = useState(() => Math.floor(Math.random() * 999999 + 100000).toString(16));
+  // ── Connection Security ──
   const [showKeyVerification, setShowKeyVerification] = useState(false);
-  const [encryptingMessage, setEncryptingMessage] = useState<string | null>(null);
 
   // ── Input ──
   const [inputText, setInputText] = useState('');
@@ -369,13 +370,7 @@ export default function MessagesScreen({
 
   // ── Doodle ──
   const [showDoodleModal, setShowDoodleModal] = useState(false);
-  const [doodleColor, setDoodleColor] = useState('#8B5CF6');
-  const [doodleBrushSize] = useState(6);
   const [doodleBg] = useState('solid-white');
-  const doodleCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [isDoodleDrawing, setIsDoodleDrawing] = useState(false);
-  const [doodleUndoStack, setDoodleUndoStack] = useState<string[]>([]);
-  const [isErasing, setIsErasing] = useState(false);
 
   // ── Stickers ──
   const [showStickerTray, setShowStickerTray] = useState(false);
@@ -881,19 +876,26 @@ export default function MessagesScreen({
         if (newMsg.senderId !== currentUser.id) {
           playChatSound('receive');
           if (!payload.new.is_read || !payload.new.is_delivered) {
+            const isFocused = document.hasFocus();
             const now = new Date().toISOString();
             supabase.from('messages').update({
               is_delivered: true,
-              is_read: true,
+              is_read: isFocused,
               delivered_at: now,
-              read_at: now
+              read_at: isFocused ? now : null
             }).eq('id', newMsg.id).then();
 
             // Broadcast checkmarks instantly
             channel.send({
               type: 'broadcast',
               event: 'status_update',
-              payload: { messageId: newMsg.id, isRead: true, isDelivered: true, readAt: now, deliveredAt: now }
+              payload: { 
+                messageId: newMsg.id, 
+                isRead: isFocused, 
+                isDelivered: true, 
+                readAt: isFocused ? now : null, 
+                deliveredAt: now 
+              }
             });
           }
         }
@@ -953,30 +955,42 @@ export default function MessagesScreen({
   // ─────────────────────────────────────────────
   useEffect(() => {
     if (!selectedChat || !isSupabaseConfigured || !supabase) return;
-    const unread = messages.filter(m => m.senderId !== currentUser.id && !m.isRead);
-    if (unread.length === 0) return;
-    const ids = unread.map(m => m.id);
-    const now = new Date().toISOString();
-    supabase.from('messages').update({
-      is_read: true,
-      read_at: now,
-      is_delivered: true,
-      delivered_at: now
-    }).in('id', ids).then(({ error }) => {
-      if (!error) {
-        setMessages(prev => prev.map(m => ids.includes(m.id) ? { ...m, isRead: true, isDelivered: true, readAt: now, deliveredAt: now } : m));
-        // Broadcast read checkmarks instantly to sender
-        if (realtimeChannelRef.current) {
-          ids.forEach(id => {
-            realtimeChannelRef.current.send({
-              type: 'broadcast',
-              event: 'status_update',
-              payload: { messageId: id, isRead: true, isDelivered: true, readAt: now, deliveredAt: now }
+
+    const markAsRead = () => {
+      if (!document.hasFocus()) return;
+      const unread = messages.filter(m => m.senderId !== currentUser.id && !m.isRead);
+      if (unread.length === 0) return;
+      const ids = unread.map(m => m.id);
+      const now = new Date().toISOString();
+      supabase.from('messages').update({
+        is_read: true,
+        read_at: now,
+        is_delivered: true,
+        delivered_at: now
+      }).in('id', ids).then(({ error }) => {
+        if (!error) {
+          setMessages(prev => prev.map(m => ids.includes(m.id) ? { ...m, isRead: true, isDelivered: true, readAt: now, deliveredAt: now } : m));
+          // Broadcast read checkmarks instantly to sender
+          if (realtimeChannelRef.current) {
+            ids.forEach(id => {
+              realtimeChannelRef.current.send({
+                type: 'broadcast',
+                event: 'status_update',
+                payload: { messageId: id, isRead: true, isDelivered: true, readAt: now, deliveredAt: now }
+              });
             });
-          });
+          }
         }
-      }
-    });
+      });
+    };
+
+    markAsRead();
+
+    // Listen for tab focus/active state
+    window.addEventListener('focus', markAsRead);
+    return () => {
+      window.removeEventListener('focus', markAsRead);
+    };
   }, [selectedChat, messages, currentUser.id]);
 
   const formatLastSeen = (isoString: string) => {
@@ -1418,13 +1432,7 @@ export default function MessagesScreen({
       payload.receiver_id = selectedChat.id;
     }
 
-    // E2EE encrypt animation
-    if (payload.text) {
-      const cipher = btoa(unescape(encodeURIComponent(payload.text))).slice(0, 24) + '...';
-      setEncryptingMessage(cipher);
-      await new Promise(r => setTimeout(r, 350));
-      setEncryptingMessage(null);
-    }
+
 
     const { data: newRowData, error } = await supabase.from('messages').insert(payload).select().single();
     if (error) { console.error('[Messages] sendMessage:', error); return; }
@@ -1686,68 +1694,13 @@ export default function MessagesScreen({
   // ─────────────────────────────────────────────
   // Doodle
   // ─────────────────────────────────────────────
-  const getDoodleCtx = () => {
-    const c = doodleCanvasRef.current;
-    if (!c) return null;
-    return { c, ctx: c.getContext('2d') };
-  };
-
-  const startDoodle = (e: React.MouseEvent | React.TouchEvent) => {
-    const res = getDoodleCtx();
-    if (!res) return;
-    const { c, ctx } = res;
-    if (!ctx) return;
-    setIsDoodleDrawing(true);
-    setDoodleUndoStack(prev => [...prev, c.toDataURL()]);
-    ctx.beginPath();
-    const rect = c.getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-    ctx.moveTo(clientX - rect.left, clientY - rect.top);
-  };
-
-  const drawDoodle = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!isDoodleDrawing) return;
-    const res = getDoodleCtx();
-    if (!res) return;
-    const { c, ctx } = res;
-    if (!ctx) return;
-    const rect = c.getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-    ctx.strokeStyle = isErasing ? '#ffffff' : doodleColor;
-    ctx.lineWidth = isErasing ? doodleBrushSize * 3 : doodleBrushSize;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.lineTo(clientX - rect.left, clientY - rect.top);
-    ctx.stroke();
-  };
-
-  const stopDoodle = () => setIsDoodleDrawing(false);
-
-  const undoDoodle = () => {
-    const res = getDoodleCtx();
-    if (!res || doodleUndoStack.length === 0) return;
-    const { c, ctx } = res;
-    if (!ctx) return;
-    const prev = doodleUndoStack[doodleUndoStack.length - 1];
-    setDoodleUndoStack(s => s.slice(0, -1));
-    const img = new Image();
-    img.src = prev;
-    img.onload = () => { ctx.clearRect(0, 0, c.width, c.height); ctx.drawImage(img, 0, 0); };
-  };
-
-  const sendDoodle = () => {
-    const c = doodleCanvasRef.current;
-    if (!c) return;
-    c.toBlob(async blob => {
-      if (!blob || !isSupabaseConfigured || !supabase) return;
-      const path = `doodles/${currentUser.id}/${Date.now()}.png`;
-      await supabase.storage.from('messages-media').upload(path, blob, { contentType: 'image/png' });
-      const { data: urlData } = supabase.storage.from('messages-media').getPublicUrl(path);
-      await sendMessage({ mediaUrl: urlData.publicUrl, mediaType: 'image', isDoodle: true, doodleBg });
-      setShowDoodleModal(false);
-    }, 'image/png');
+  const handleSendDoodleBlob = async (blob: Blob) => {
+    if (!isSupabaseConfigured || !supabase) return;
+    const path = `doodles/${currentUser.id}/${Date.now()}.png`;
+    await supabase.storage.from('messages-media').upload(path, blob, { contentType: 'image/png' });
+    const { data: urlData } = supabase.storage.from('messages-media').getPublicUrl(path);
+    await sendMessage({ mediaUrl: urlData.publicUrl, mediaType: 'image', isDoodle: true, doodleBg });
+    setShowDoodleModal(false);
   };
 
   // ─────────────────────────────────────────────
@@ -1832,20 +1785,19 @@ export default function MessagesScreen({
 
       {/* Active Call Overlay */}
       {activeCall && (
-        <div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-between p-8">
-          {activeCall.type === 'video' && <video ref={localVideoRef} autoPlay muted playsInline className="absolute inset-0 w-full h-full object-cover opacity-60" />}
-          <div className="relative z-10 flex flex-col items-center gap-3 pt-16">
-            {selectedChat && isDirect && <img src={isRoom ? (selectedChat as ChatRoom).avatar : (selectedChat as User).avatar} alt="" className="w-24 h-24 rounded-full border-4 border-white/20 object-cover" />}
-            <p className="text-white text-xl font-bold">{selectedChat && isDirect ? (isRoom ? (selectedChat as ChatRoom).name : (selectedChat as User).name) : ''}</p>
-            <p className="text-white/60 text-sm">{activeCall.status === 'ringing' ? 'Ringing...' : formatDur(callDuration)}</p>
-            <div className="flex items-center gap-1.5 bg-emerald-500/20 text-emerald-400 text-xs font-bold px-3 py-1 rounded-full"><Lock className="w-3 h-3" />End-to-End Encrypted</div>
-          </div>
-          <div className="relative z-10 flex items-center gap-6 pb-12">
-            <button onClick={() => setIsMuted(!isMuted)} className={`w-14 h-14 rounded-full flex items-center justify-center cursor-pointer ${isMuted ? 'bg-white text-black' : 'bg-white/10 text-white'}`}>{isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}</button>
-            {activeCall.type === 'video' && <button onClick={() => setIsVideoOff(!isVideoOff)} className={`w-14 h-14 rounded-full flex items-center justify-center cursor-pointer ${isVideoOff ? 'bg-white text-black' : 'bg-white/10 text-white'}`}>{isVideoOff ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}</button>}
-            <button onClick={endCall} className="w-16 h-16 rounded-full bg-rose-600 flex items-center justify-center cursor-pointer"><Phone className="w-7 h-7 text-white rotate-[135deg]" /></button>
-          </div>
-        </div>
+        <ActiveCallOverlay
+          activeCall={activeCall}
+          localVideoRef={localVideoRef}
+          selectedChat={selectedChat}
+          isDirect={isDirect}
+          isRoom={isRoom}
+          callDuration={callDuration}
+          isMuted={isMuted}
+          setIsMuted={setIsMuted}
+          isVideoOff={isVideoOff}
+          setIsVideoOff={setIsVideoOff}
+          onEndCall={endCall}
+        />
       )}
 
       {/* Snap View */}
@@ -1866,12 +1818,7 @@ export default function MessagesScreen({
         <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-orange-500 text-white font-bold px-6 py-3 rounded-2xl shadow-2xl text-sm animate-bounce">{showStreakBonus}</div>
       )}
 
-      {/* E2EE Encrypting Toast */}
-      {encryptingMessage && (
-        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-50 bg-emerald-900/90 text-emerald-300 text-[11px] font-mono px-4 py-2 rounded-xl border border-emerald-700 shadow-xl">
-          <Lock className="w-3 h-3 inline mr-1" />Encrypting: {encryptingMessage}
-        </div>
-      )}
+
 
       <div className="flex flex-1 overflow-hidden">
         {/* ═══ SIDEBAR ═══ */}
@@ -2225,8 +2172,8 @@ export default function MessagesScreen({
             {/* E2EE panel */}
             {showKeyVerification && (
               <div className="px-4 py-3 bg-emerald-950/60 border-b border-emerald-900/40 text-xs text-emerald-400">
-                <div className="flex items-center gap-2 mb-1"><ShieldCheck className="w-4 h-4" /><span className="font-bold">End-to-End Encryption Active</span></div>
-                <p className="font-mono opacity-70">Your key: <span className="font-black">{privateKey}</span></p>
+                <div className="flex items-center gap-2 mb-1"><ShieldCheck className="w-4 h-4" /><span className="font-bold">Transport Layer Security Active</span></div>
+                <p className="opacity-70">This conversation is protected using HTTPS and secure WebSocket (WSS) protocols.</p>
               </div>
             )}
 
@@ -2606,32 +2553,11 @@ export default function MessagesScreen({
       )}
 
       {/* Doodle modal */}
-      {showDoodleModal && (
-        <div className="fixed inset-0 z-50 bg-black/90 flex flex-col items-center justify-center p-4">
-          <div className="bg-stone-900 border border-stone-800 rounded-3xl overflow-hidden w-full max-w-sm">
-            <div className="flex items-center justify-between p-4 border-b border-stone-800">
-              <h3 className="font-bold text-stone-200 flex items-center gap-2"><Palette className="w-5 h-5 text-violet-400" />Draw Something</h3>
-              <button onClick={() => setShowDoodleModal(false)} className="text-stone-500 cursor-pointer"><X className="w-5 h-5" /></button>
-            </div>
-            <div className="p-3 flex items-center gap-2 border-b border-stone-800 flex-wrap">
-              {['#8B5CF6', '#EF4444', '#3B82F6', '#10B981', '#F59E0B', '#EC4899', '#000000', '#ffffff'].map(c => (
-                <button key={c} onClick={() => { setDoodleColor(c); setIsErasing(false); }} style={{ background: c }} className={`w-7 h-7 rounded-full border-2 cursor-pointer ${doodleColor === c && !isErasing ? 'border-white scale-110' : 'border-stone-700'}`} />
-              ))}
-              <button onClick={() => setIsErasing(!isErasing)} className={`p-1.5 rounded-lg cursor-pointer ml-2 ${isErasing ? 'bg-white text-black' : 'text-stone-400 bg-stone-800'}`}><Eraser className="w-4 h-4" /></button>
-              <button onClick={undoDoodle} className="p-1.5 rounded-lg text-stone-400 bg-stone-800 cursor-pointer"><Undo2 className="w-4 h-4" /></button>
-            </div>
-            <canvas
-              ref={doodleCanvasRef} width={360} height={280}
-              className="block bg-white touch-none w-full"
-              onMouseDown={startDoodle} onMouseMove={drawDoodle} onMouseUp={stopDoodle} onMouseLeave={stopDoodle}
-              onTouchStart={startDoodle} onTouchMove={drawDoodle} onTouchEnd={stopDoodle}
-            />
-            <div className="p-3">
-              <button onClick={sendDoodle} className="w-full py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-bold text-sm cursor-pointer">Send Doodle</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <DoodleCanvasModal
+        isOpen={showDoodleModal}
+        onClose={() => setShowDoodleModal(false)}
+        onSendDoodle={handleSendDoodleBlob}
+      />
 
       {/* Forward modal */}
       {showForwardModal && messageToForward && (

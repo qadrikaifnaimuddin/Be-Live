@@ -22,14 +22,15 @@ interface NotificationsPanelProps {
 }
 
 const notifIcon = (type: Notification['type']) => {
+  const baseClass = "w-[22px] h-[22px] rounded-full border-2 border-stone-950 flex items-center justify-center shadow-md";
   switch (type) {
-    case 'follow': return <div className="w-8 h-8 rounded-full bg-violet-500/20 flex items-center justify-center"><UserPlus className="w-4 h-4 text-violet-400" /></div>;
-    case 'follow_request': return <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center"><Users className="w-4 h-4 text-amber-400" /></div>;
-    case 'follow_accept': return <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center"><UserCheck className="w-4 h-4 text-emerald-400" /></div>;
-    case 'like': return <div className="w-8 h-8 rounded-full bg-rose-500/20 flex items-center justify-center"><Heart className="w-4 h-4 text-rose-400" /></div>;
-    case 'comment': return <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center"><MessageCircle className="w-4 h-4 text-blue-400" /></div>;
-    case 'mention': return <div className="w-8 h-8 rounded-full bg-sky-500/20 flex items-center justify-center"><AtSign className="w-4 h-4 text-sky-400" /></div>;
-    default: return <div className="w-8 h-8 rounded-full bg-stone-700 flex items-center justify-center"><Bell className="w-4 h-4 text-stone-400" /></div>;
+    case 'follow': return <div className={`${baseClass} bg-violet-600`}><UserPlus className="w-2.5 h-2.5 text-white" /></div>;
+    case 'follow_request': return <div className={`${baseClass} bg-amber-600`}><Users className="w-2.5 h-2.5 text-white" /></div>;
+    case 'follow_accept': return <div className={`${baseClass} bg-emerald-600`}><UserCheck className="w-2.5 h-2.5 text-white" /></div>;
+    case 'like': return <div className={`${baseClass} bg-rose-600`}><Heart className="w-2.5 h-2.5 text-white fill-current" /></div>;
+    case 'comment': return <div className={`${baseClass} bg-blue-600`}><MessageCircle className="w-2.5 h-2.5 text-white fill-current" /></div>;
+    case 'mention': return <div className={`${baseClass} bg-sky-600`}><AtSign className="w-2.5 h-2.5 text-white" /></div>;
+    default: return <div className={`${baseClass} bg-stone-700`}><Bell className="w-2.5 h-2.5 text-white" /></div>;
   }
 };
 
