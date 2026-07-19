@@ -125,9 +125,14 @@ export default function UserProfilePage({
     setLoadingFollow(true);
     try {
       if (isFollowing(profile.id)) {
+        // Unfollow
         await onUnfollow(profile.id);
         setProfile(prev => prev ? { ...prev, followersCount: Math.max(0, prev.followersCount - 1) } : prev);
+      } else if (hasPendingRequest(profile.id)) {
+        // Cancel pending follow request
+        await onUnfollow(profile.id);
       } else {
+        // Follow / Request
         await onFollow(profile.id, profile.isPrivate);
         if (!profile.isPrivate) {
           setProfile(prev => prev ? { ...prev, followersCount: prev.followersCount + 1 } : prev);
@@ -219,10 +224,13 @@ export default function UserProfilePage({
           </div>
         </div>
 
-        {/* Bio */}
+        {/* Bio — strip HTML tags so raw markup isn't visible */}
         {profile.bio && (
-          <p className="text-sm text-stone-300 leading-relaxed mb-4 whitespace-pre-wrap">{profile.bio}</p>
+          <p className="text-sm text-stone-300 leading-relaxed mb-4 whitespace-pre-wrap">
+            {profile.bio.replace(/<[^>]+>/g, '')}
+          </p>
         )}
+
 
         {/* Action buttons */}
         {!isSelf && currentUser && (

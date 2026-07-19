@@ -204,7 +204,7 @@ export default function MessagesScreen({
 }: MessagesScreenProps) {
 
   // ── Sidebar ──
-  const [activeSidebarTab, setActiveSidebarTab] = useState<'all' | 'direct' | 'groups' | 'channels'>('all');
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'all' | 'direct' | 'groups' | 'channels' | 'calls'>('all');
   const [chatSearchQuery, setChatSearchQuery] = useState('');
 
   // ── Rooms ──
@@ -1881,10 +1881,10 @@ export default function MessagesScreen({
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-lg font-black text-stone-100 flex items-center gap-2"><MessageCircle className="w-5 h-5 text-violet-400" />Messages</h2>
               <div className="flex gap-1">
-                <button onClick={() => setShowCallHistory(!showCallHistory)} className="p-2 text-stone-400 hover:text-stone-200 hover:bg-stone-900/60 rounded-xl transition-all cursor-pointer" title="Call History"><History className="w-4 h-4" /></button>
                 <button onClick={() => setShowCreateGroupModal(true)} className="p-2 text-stone-400 hover:text-violet-400 hover:bg-violet-500/10 rounded-xl transition-all cursor-pointer" title="New Group"><Users className="w-4 h-4" /></button>
                 <button onClick={() => setShowCreateChannelModal(true)} className="p-2 text-stone-400 hover:text-amber-400 hover:bg-amber-500/10 rounded-xl transition-all cursor-pointer" title="New Channel"><Hash className="w-4 h-4" /></button>
               </div>
+
             </div>
 
             {/* User search for new DM */}
@@ -1915,12 +1915,21 @@ export default function MessagesScreen({
               </div>
             )}
 
-            {/* Tab pills */}
+            {/* Tab pills — All, Direct, Groups, Channels, Calls */}
             <div className="flex gap-1">
-              {(['all', 'direct', 'groups', 'channels'] as const).map(tab => (
-                <button key={tab} onClick={() => setActiveSidebarTab(tab)} className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-all cursor-pointer ${activeSidebarTab === tab ? 'bg-violet-600 text-white' : 'text-stone-500 hover:text-stone-300'}`}>{tab}</button>
+              {(['all', 'direct', 'groups', 'channels', 'calls'] as const).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveSidebarTab(tab)}
+                  className={`flex-1 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer ${
+                    activeSidebarTab === tab ? 'bg-violet-600 text-white' : 'text-stone-500 hover:text-stone-300'
+                  }`}
+                >
+                  {tab === 'calls' ? '📞' : tab}
+                </button>
               ))}
             </div>
+
           </div>
 
           {/* Room search */}
@@ -1931,31 +1940,53 @@ export default function MessagesScreen({
             </div>
           </div>
 
-          {/* Call history */}
-          {showCallHistory && (
-            <div className="border-b border-stone-900 bg-stone-900/40 max-h-60 overflow-y-auto">
+          {/* Call history — shown as full panel when Calls tab is active, otherwise hidden */}
+          {activeSidebarTab === 'calls' && (
+            <div className="flex-1 overflow-y-auto">
               <div className="p-3">
                 <h3 className="text-xs font-extrabold text-stone-400 uppercase tracking-wider mb-2">Call History</h3>
                 {callHistory.length === 0 && <p className="text-xs text-stone-600 italic">No calls yet.</p>}
-                {callHistory.map(c => (
-                  <div key={c.id} className="flex items-center gap-3 py-2 border-b border-stone-800 last:border-0">
-                    <img src={c.receiverId === currentUser.id ? c.callerAvatar : c.receiverAvatar} alt="" className="w-8 h-8 rounded-full object-cover" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold text-stone-200 truncate">{c.receiverId === currentUser.id ? c.callerName : c.receiverName}</p>
-                      <p className="text-[10px] text-stone-500 flex items-center gap-1">
-                        {c.status === 'missed' ? <PhoneMissed className="w-3 h-3 text-rose-500" /> : c.status === 'outgoing' ? <ArrowUpRight className="w-3 h-3 text-emerald-500" /> : <ArrowDownLeft className="w-3 h-3 text-blue-400" />}
-                        {c.type === 'video' ? <Video className="w-3 h-3" /> : <Phone className="w-3 h-3" />}
-                        {c.duration ? formatDur(c.duration) : 'No answer'}
-                      </p>
+                {callHistory.map(c => {
+                  const isIncoming = c.receiverId === currentUser.id;
+                  const otherName  = isIncoming ? c.callerName  : c.receiverName;
+                  const otherAva   = isIncoming ? c.callerAvatar : c.receiverAvatar;
+                  return (
+                    <div key={c.id} className="flex items-center gap-3 py-2.5 border-b border-stone-800/60 last:border-0">
+                      <img
+                        src={otherAva || `https://api.dicebear.com/7.x/adventurer/svg?seed=${otherName}`}
+                        alt=""
+                        className="w-9 h-9 rounded-full object-cover flex-shrink-0"
+                        onError={e => { (e.target as HTMLImageElement).src = `https://api.dicebear.com/7.x/adventurer/svg?seed=${otherName}`; }}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-stone-200 truncate">{otherName || 'Unknown'}</p>
+                        <p className="text-[10px] text-stone-500 flex items-center gap-1 mt-0.5">
+                          {c.status === 'missed'
+                            ? <PhoneMissed className="w-3 h-3 text-rose-500" />
+                            : c.status === 'outgoing'
+                            ? <ArrowUpRight className="w-3 h-3 text-emerald-500" />
+                            : <ArrowDownLeft className="w-3 h-3 text-blue-400" />
+                          }
+                          {c.type === 'video' ? <Video className="w-3 h-3" /> : <Phone className="w-3 h-3" />}
+                          <span>{c.status === 'missed' ? 'Missed' : c.status === 'outgoing' ? 'Outgoing' : 'Incoming'}</span>
+                          {c.duration ? <span className="text-stone-600">· {formatDur(c.duration)}</span> : null}
+                        </p>
+                        <p className="text-[10px] text-stone-600 mt-0.5">{new Date(c.createdAt).toLocaleString()}</p>
+                      </div>
+                      {c.type === 'video'
+                        ? <Video className="w-3.5 h-3.5 text-stone-600 shrink-0" />
+                        : <Phone className="w-3.5 h-3.5 text-stone-600 shrink-0" />
+                      }
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
 
-          {/* Rooms list */}
+          {activeSidebarTab !== 'calls' && (
           <div className="flex-1 overflow-y-auto">
+
             {filteredRooms
               .filter(r => {
                 if (activeSidebarTab === 'all') return true;
@@ -2005,6 +2036,8 @@ export default function MessagesScreen({
                 );
               })}
           </div>
+          )}
+
         </div>
 
         {/* ═══ CHAT PANEL ═══ */}
@@ -2088,7 +2121,49 @@ export default function MessagesScreen({
                 <div className="flex items-center gap-1">
                   {pinnedInChat.length > 0 && <button onClick={() => setShowPinnedMessagesModal(true)} className="p-2 text-amber-400 hover:bg-amber-500/10 rounded-xl cursor-pointer" title="Pinned"><Pin className="w-4 h-4" /></button>}
                   <button onClick={() => setShowActiveChatSearch(!showActiveChatSearch)} className="p-2 text-stone-400 hover:text-stone-200 hover:bg-stone-900/60 rounded-xl cursor-pointer"><Search className="w-4 h-4" /></button>
+                  {/* Group call button — groups only */}
+                  {isRoom && (selectedChat as ChatRoom).type === 'group' && (
+                    <button
+                      onClick={async () => {
+                        const room = selectedChat as ChatRoom;
+                        // Send a call notification message in the group chat
+                        const callMsg = {
+                          id: `msg_${Date.now()}`,
+                          senderId: currentUser.id,
+                          senderName: currentUser.name || currentUser.username,
+                          text: `📞 ${currentUser.name || currentUser.username} started a group voice call`,
+                          createdAt: new Date().toISOString(),
+                          mediaType: 'call' as const,
+                          isRead: false, isDelivered: false, isPinned: false,
+                          isForwarded: false, isSticker: false, isDisappearing: false,
+                        };
+                        // Insert call message to DB
+                        if (isSupabaseConfigured && supabase) {
+                          await supabase.from('messages').insert({
+                            room_id: room.id,
+                            sender_id: currentUser.id,
+                            text: callMsg.text,
+                            media_type: 'call',
+                          });
+                          // Log to call_history as group call (receiver_id = room.id treated as string)
+                          supabase.from('call_history').insert({
+                            caller_id: currentUser.id,
+                            receiver_id: room.members.find(m => m !== currentUser.id) || currentUser.id,
+                            call_type: 'audio',
+                            status: 'completed',
+                            duration: 0,
+                          }).then(() => {});
+                        }
+                      }}
+                      className="p-2 text-stone-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-xl cursor-pointer transition-all"
+                      title="Group Voice Call"
+                    >
+                      <Phone className="w-4 h-4" />
+                    </button>
+                  )}
+
                   {isDirect && directTargetUser && (
+
                     <div className="relative">
                       <button
                         onClick={() => setShowCallMenu(v => !v)}
@@ -2292,7 +2367,7 @@ export default function MessagesScreen({
                           transform: activeDragId === msg.id ? `translateX(${dragX}px)` : 'none',
                           transition: activeDragId === msg.id ? 'none' : 'transform 0.2s ease-out'
                         }}
-                        className={`relative rounded-2xl px-3 py-2 cursor-pointer select-none transition-all ${me ? 'bg-violet-600 text-white rounded-br-sm' : 'bg-stone-800 text-stone-100 rounded-bl-sm'} ${msg.isPinned ? 'ring-1 ring-amber-500/40' : ''} ${isSelected ? 'ring-2 ring-rose-500 bg-rose-950/20' : ''}`}
+                        className={`relative rounded-2xl px-3 py-1.5 cursor-pointer select-none transition-all ${me ? 'bg-violet-600 text-white rounded-br-sm' : 'bg-stone-800 text-stone-100 rounded-bl-sm'} ${msg.isPinned ? 'ring-1 ring-amber-500/40' : ''} ${isSelected ? 'ring-2 ring-rose-500 bg-rose-950/20' : ''}`}
 
                       >
                         {msg.mediaType === 'snap' && (
@@ -2342,7 +2417,7 @@ export default function MessagesScreen({
                         {msg.isDisappearing && countdown !== undefined && countdown > 0 && (
                           <p className="text-[10px] opacity-60 mt-0.5 flex items-center gap-1"><Clock className="w-2.5 h-2.5" />{Math.ceil(countdown)}s</p>
                         )}
-                        <div className="flex items-center justify-end gap-1 mt-0.5 min-h-[14px]">
+                        <div className="flex items-center justify-end gap-1 mt-0.5">
                           {me && msg.mediaType !== 'call' && (
                             msg.isRead ? (
                               <CheckCheck className="w-3.5 h-3.5 text-sky-400" />
