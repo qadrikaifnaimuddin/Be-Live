@@ -59,6 +59,8 @@ export interface WebRTCState {
   remoteUser: RemoteUser | null;
   isMuted: boolean;
   isVideoOff: boolean;
+  isSpeakerOn: boolean;
+  isScreenSharing: boolean;
   callDuration: number;
   error: string | null;
 }
@@ -98,6 +100,8 @@ export function useWebRTC(
     remoteUser: null,
     isMuted: false,
     isVideoOff: false,
+    isSpeakerOn: true,
+    isScreenSharing: false,
     callDuration: 0,
     error: null,
   });
@@ -114,6 +118,7 @@ export function useWebRTC(
   const callTypeRef      = useRef<'audio' | 'video'>('audio');
   const pendingCandidates = useRef<RTCIceCandidateInit[]>([]);
   const callStartTimeRef = useRef<number | null>(null); // epoch ms when 'connected'
+  const facingModeRef    = useRef<'user' | 'environment'>('user'); // for camera flip
 
   // ── Helpers ────────────────────────────────────────────────────
   const channelName = useCallback(
@@ -538,6 +543,132 @@ export function useWebRTC(
     }
   }, []);
 
+  // ── Toggle speaker (earpiece ↔ loudspeaker) ────────────────────
+  const toggleSpeaker = useCallback(() => {
+    // setSinkId is available on HTMLAudioElement / HTMLVideoElement in most browsers
+    const videoEl = remoteVideoRef.current as any;
+    if (videoEl && typeof videoEl.setSinkId === 'function') {
+      const nextSpeaker = !state.isSpeakerOn;
+      // '' = default (speaker), 'communications' = earpiece on some systems
+      videoEl.setSinkId(nextSpeaker ? '' : 'communications').catch(() => {});
+      setState(prev => ({ ...prev, isSpeakerOn: nextSpeaker }));
+    } else {
+      // Fallback: just toggle state (browser may not support setSinkId on mobile)
+      setState(prev => ({ ...prev, isSpeakerOn: !prev.isSpeakerOn }));
+    }
+  }, [state.isSpeakerOn]);
+
+  // ── Flip camera (front ↔ back) ─────────────────────────────────
+  const flipCamera = useCallback(async () => {
+    const pc = pcRef.current;
+    const stream = localStreamRef.current;
+    if (!pc || !stream) return;
+    try {
+      const nextFacing = facingModeRef.current === 'user' ? 'environment' : 'user';
+      facingModeRef.current = nextFacing;
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: nextFacing },
+        audio: false,
+      });
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      if (!newVideoTrack) return;
+      // Replace old video track in peer connection
+      const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+      if (sender) await sender.replaceTrack(newVideoTrack);
+      // Replace in local stream
+      const oldVideoTrack = stream.getVideoTracks()[0];
+      if (oldVideoTrack) {
+        stream.removeTrack(oldVideoTrack);
+        oldVideoTrack.stop();
+      }
+      stream.addTrack(newVideoTrack);
+      // Update local video preview
+      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+    } catch (err) {
+      console.error('[WebRTC] flipCamera error:', err);
+    }
+  }, []);
+
+  // ── Share screen (replaces video track with screen capture) ─────
+  const shareScreen = useCallback(async () => {
+    const pc = pcRef.current;
+    const stream = localStreamRef.current;
+    if (!pc || !stream) return;
+    try {
+      if (state.isScreenSharing) {
+        // Stop screen share — revert to camera
+        const cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 1280, height: 720 },
+          audio: false,
+        });
+        const cameraTrack = cameraStream.getVideoTracks()[0];
+        const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+        if (sender && cameraTrack) await sender.replaceTrack(cameraTrack);
+        const oldTrack = stream.getVideoTracks()[0];
+        if (oldTrack) { stream.removeTrack(oldTrack); oldTrack.stop(); }
+        stream.addTrack(cameraTrack);
+        if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+        setState(prev => ({ ...prev, isScreenSharing: false }));
+      } else {
+        // Start screen share
+        const screenStream = await (navigator.mediaDevices as any).getDisplayMedia({
+          video: { cursor: 'always' },
+          audio: false,
+        });
+        const screenTrack = screenStream.getVideoTracks()[0];
+        const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+        if (sender && screenTrack) await sender.replaceTrack(screenTrack);
+        const oldTrack = stream.getVideoTracks()[0];
+        if (oldTrack) { stream.removeTrack(oldTrack); oldTrack.stop(); }
+        stream.addTrack(screenTrack);
+        if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+        // Auto-revert when user stops screen share via browser UI
+        screenTrack.onended = () => shareScreen();
+        setState(prev => ({ ...prev, isScreenSharing: true }));
+      }
+    } catch (err) {
+      console.error('[WebRTC] shareScreen error:', err);
+    }
+  }, [state.isScreenSharing]);
+
+  // ── Upgrade audio call to video mid-call ───────────────────────
+  const upgradeToVideo = useCallback(async () => {
+    const pc = pcRef.current;
+    const stream = localStreamRef.current;
+    if (!pc || !stream || state.callType === 'video') return;
+    try {
+      const videoStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 1280, height: 720 },
+        audio: false,
+      });
+      const videoTrack = videoStream.getVideoTracks()[0];
+      if (!videoTrack) return;
+      stream.addTrack(videoTrack);
+      pc.addTrack(videoTrack, stream);
+      // Renegotiate
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      channelRef.current?.send({
+        type: 'broadcast',
+        event: 'signal',
+        payload: {
+          type: 'offer',
+          from: currentUserId,
+          fromName: '',
+          fromUsername: '',
+          fromAvatar: '',
+          callType: 'video',
+          sdp: offer,
+        } as any,
+      });
+      callTypeRef.current = 'video';
+      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+      setState(prev => ({ ...prev, callType: 'video', isVideoOff: false }));
+    } catch (err) {
+      console.error('[WebRTC] upgradeToVideo error:', err);
+    }
+  }, [currentUserId, state.callType]);
+
   // ── Cleanup on unmount ─────────────────────────────────────────
   useEffect(() => () => { cleanup(); }, [cleanup]);
 
@@ -549,6 +680,10 @@ export function useWebRTC(
     endCall,
     toggleMute,
     toggleVideo,
+    toggleSpeaker,
+    flipCamera,
+    shareScreen,
+    upgradeToVideo,
     localVideoRef,
     remoteVideoRef,
     updateCallerInfo: (name: string, username: string, avatar: string) => {

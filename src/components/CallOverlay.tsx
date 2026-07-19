@@ -1,13 +1,14 @@
-/**
- * CallOverlay — Be-Live
+﻿/**
+ * CallOverlay â€” Be-Live
  * Full-screen overlay for incoming, active audio, and active video calls.
  * Rendered at the App level so it shows over any screen.
  */
 
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import {
   Phone, Video, Mic, MicOff, VideoOff, PhoneOff,
-  PhoneIncoming, Lock, Signal, WifiOff
+  PhoneIncoming, Lock, Volume2, VolumeX, Camera, Monitor,
+  MonitorOff, RotateCcw,
 } from 'lucide-react';
 import { WebRTCState, CallStatus } from '../lib/useWebRTC';
 
@@ -20,6 +21,10 @@ interface CallOverlayProps {
   onEnd: () => void;
   onToggleMute: () => void;
   onToggleVideo: () => void;
+  onToggleSpeaker: () => void;
+  onFlipCamera: () => void;
+  onShareScreen: () => void;
+  onUpgradeToVideo: () => void;
 }
 
 const formatDur = (s: number) => {
@@ -46,6 +51,10 @@ export default function CallOverlay({
   onEnd,
   onToggleMute,
   onToggleVideo,
+  onToggleSpeaker,
+  onFlipCamera,
+  onShareScreen,
+  onUpgradeToVideo,
 }: CallOverlayProps) {
   if (state.status === 'idle') return null;
 
@@ -55,6 +64,7 @@ export default function CallOverlay({
   const isEnded = state.status === 'ended';
   const isCalling = state.status === 'calling';
   const remote = state.remoteUser;
+  const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
 
   return (
     <div
@@ -65,7 +75,7 @@ export default function CallOverlay({
           : 'linear-gradient(135deg, #0d0d0f 0%, #1a0a2e 50%, #0d0d0f 100%)',
       }}
     >
-      {/* ── Remote video (background) ── */}
+      {/* Remote video (background) */}
       {isVideo && (
         <video
           ref={remoteVideoRef}
@@ -77,16 +87,13 @@ export default function CallOverlay({
         />
       )}
 
-      {/* Dark overlay for readability */}
       <div className="absolute inset-0 bg-black/50" />
 
-      {/* ── Content ── */}
       <div className="relative z-10 flex flex-col h-full">
 
-        {/* Top section — caller info */}
+        {/* Caller info */}
         <div className="flex flex-col items-center pt-20 pb-6 px-6 flex-1">
 
-          {/* Status badge */}
           <div className="mb-6 flex items-center gap-2">
             {isActive ? (
               <div className="flex items-center gap-1.5 bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-xs font-bold px-3 py-1.5 rounded-full backdrop-blur-sm">
@@ -101,7 +108,6 @@ export default function CallOverlay({
             )}
           </div>
 
-          {/* Avatar with pulse ring on incoming */}
           <div className="relative mb-4">
             {isIncoming && (
               <>
@@ -113,10 +119,7 @@ export default function CallOverlay({
               <div className="absolute inset-[-8px] rounded-full border-2 border-emerald-500/30 animate-ping" />
             )}
             <img
-              src={
-                remote?.avatar ||
-                `https://api.dicebear.com/7.x/adventurer/svg?seed=${remote?.username}`
-              }
+              src={remote?.avatar || `https://api.dicebear.com/7.x/adventurer/svg?seed=${remote?.username}`}
               alt={remote?.name}
               className="w-28 h-28 rounded-full object-cover border-2 border-white/20 shadow-2xl"
               onError={e => {
@@ -125,31 +128,26 @@ export default function CallOverlay({
             />
           </div>
 
-          {/* Name */}
           <h2 className="text-2xl font-black text-white mb-1 text-center">
             {remote?.name || remote?.username || 'Unknown'}
           </h2>
           <p className="text-stone-400 text-sm mb-2">@{remote?.username}</p>
 
-          {/* Call type indicator */}
           <div className="flex items-center gap-1.5 text-stone-500 text-xs">
             {isVideo ? <Video className="w-3.5 h-3.5" /> : <Phone className="w-3.5 h-3.5" />}
             <span>{isVideo ? 'Video' : 'Voice'} Call</span>
           </div>
 
-          {/* Duration (connected) */}
           {isActive && (
             <div className="mt-4 text-stone-300 font-mono text-lg font-bold">
               {formatDur(state.callDuration)}
             </div>
           )}
 
-          {/* Ended flash */}
           {isEnded && (
             <div className="mt-6 text-stone-400 text-sm">Call ended</div>
           )}
 
-          {/* Pulse animation for ringing/calling states */}
           {(isCalling || isIncoming) && (
             <div className="mt-8 flex items-center gap-1.5">
               {[0, 1, 2].map(i => (
@@ -163,7 +161,7 @@ export default function CallOverlay({
           )}
         </div>
 
-        {/* Local video pip (video calls) */}
+        {/* Local video PiP */}
         {isVideo && isActive && (
           <div className="absolute top-4 right-4 w-28 h-40 rounded-2xl overflow-hidden border border-white/20 shadow-2xl z-20">
             <video
@@ -181,13 +179,12 @@ export default function CallOverlay({
           </div>
         )}
 
-        {/* ── Controls ── */}
-        <div className="relative z-10 pb-16 px-8">
+        {/* Controls */}
+        <div className="relative z-10 pb-12 px-6">
 
-          {/* Incoming call — Accept / Reject */}
+          {/* Incoming: accept / reject */}
           {isIncoming && (
             <div className="flex items-center justify-center gap-16">
-              {/* Reject */}
               <div className="flex flex-col items-center gap-2">
                 <button
                   onClick={onReject}
@@ -197,73 +194,126 @@ export default function CallOverlay({
                 </button>
                 <span className="text-xs text-stone-400 font-medium">Decline</span>
               </div>
-
-              {/* Accept */}
               <div className="flex flex-col items-center gap-2">
                 <button
                   onClick={onAccept}
                   className="w-16 h-16 rounded-full bg-emerald-500 hover:bg-emerald-600 flex items-center justify-center cursor-pointer shadow-2xl transition-all active:scale-95"
                   style={{ animation: 'gentlePulse 1.5s ease-in-out infinite' }}
                 >
-                  {isVideo ? (
-                    <Video className="w-7 h-7 text-white" />
-                  ) : (
-                    <Phone className="w-7 h-7 text-white" />
-                  )}
+                  {isVideo ? <Video className="w-7 h-7 text-white" /> : <Phone className="w-7 h-7 text-white" />}
                 </button>
                 <span className="text-xs text-stone-300 font-medium">Accept</span>
               </div>
             </div>
           )}
 
-          {/* Active / Connecting / Calling — controls */}
+          {/* Active/connecting/calling controls */}
           {(isActive || isCalling || state.status === 'connecting') && (
-            <div className="flex items-center justify-center gap-6">
-              {/* Mute */}
-              <div className="flex flex-col items-center gap-2">
-                <button
-                  onClick={onToggleMute}
-                  className={`w-14 h-14 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 ${
-                    state.isMuted
-                      ? 'bg-white text-stone-900'
-                      : 'bg-white/15 text-white hover:bg-white/25'
-                  }`}
-                >
-                  {state.isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
-                </button>
-                <span className="text-xs text-stone-400">{state.isMuted ? 'Unmute' : 'Mute'}</span>
+            <>
+              {/* Secondary row */}
+              <div className="flex items-center justify-center gap-5 mb-5">
+
+                {/* Speaker */}
+                <div className="flex flex-col items-center gap-1.5">
+                  <button
+                    onClick={onToggleSpeaker}
+                    className={`w-12 h-12 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 ${
+                      state.isSpeakerOn ? 'bg-white/15 text-white hover:bg-white/25' : 'bg-white text-stone-900'
+                    }`}
+                    title="Speaker"
+                  >
+                    {state.isSpeakerOn ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+                  </button>
+                  <span className="text-[10px] text-stone-400">{state.isSpeakerOn ? 'Speaker' : 'Earpiece'}</span>
+                </div>
+
+                {/* Camera flip â€” video + mobile only */}
+                {isVideo && isMobile && (
+                  <div className="flex flex-col items-center gap-1.5">
+                    <button
+                      onClick={onFlipCamera}
+                      className="w-12 h-12 rounded-full bg-white/15 text-white hover:bg-white/25 flex items-center justify-center cursor-pointer transition-all active:scale-95"
+                      title="Flip Camera"
+                    >
+                      <RotateCcw className="w-5 h-5" />
+                    </button>
+                    <span className="text-[10px] text-stone-400">Flip</span>
+                  </div>
+                )}
+
+                {/* Screen share â€” video + desktop only */}
+                {isVideo && !isMobile && (
+                  <div className="flex flex-col items-center gap-1.5">
+                    <button
+                      onClick={onShareScreen}
+                      className={`w-12 h-12 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 ${
+                        state.isScreenSharing ? 'bg-violet-500 text-white' : 'bg-white/15 text-white hover:bg-white/25'
+                      }`}
+                      title={state.isScreenSharing ? 'Stop Sharing' : 'Share Screen'}
+                    >
+                      {state.isScreenSharing ? <MonitorOff className="w-5 h-5" /> : <Monitor className="w-5 h-5" />}
+                    </button>
+                    <span className="text-[10px] text-stone-400">{state.isScreenSharing ? 'Stop Share' : 'Share'}</span>
+                  </div>
+                )}
+
+                {/* Upgrade to video â€” audio call while active */}
+                {!isVideo && isActive && (
+                  <div className="flex flex-col items-center gap-1.5">
+                    <button
+                      onClick={onUpgradeToVideo}
+                      className="w-12 h-12 rounded-full bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 flex items-center justify-center cursor-pointer transition-all active:scale-95"
+                      title="Switch to Video"
+                    >
+                      <Camera className="w-5 h-5" />
+                    </button>
+                    <span className="text-[10px] text-stone-400">Video</span>
+                  </div>
+                )}
               </div>
 
-              {/* Hang up */}
-              <div className="flex flex-col items-center gap-2">
-                <button
-                  onClick={onEnd}
-                  className="w-16 h-16 rounded-full bg-rose-600 hover:bg-rose-700 flex items-center justify-center cursor-pointer shadow-2xl transition-all active:scale-95"
-                >
-                  <PhoneOff className="w-7 h-7 text-white" />
-                </button>
-                <span className="text-xs text-stone-400">End</span>
-              </div>
-
-              {/* Video toggle (video calls only) */}
-              {isVideo && (
+              {/* Primary row */}
+              <div className="flex items-center justify-center gap-6">
+                {/* Mute */}
                 <div className="flex flex-col items-center gap-2">
                   <button
-                    onClick={onToggleVideo}
+                    onClick={onToggleMute}
                     className={`w-14 h-14 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 ${
-                      state.isVideoOff
-                        ? 'bg-white text-stone-900'
-                        : 'bg-white/15 text-white hover:bg-white/25'
+                      state.isMuted ? 'bg-white text-stone-900' : 'bg-white/15 text-white hover:bg-white/25'
                     }`}
                   >
-                    {state.isVideoOff ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}
+                    {state.isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
                   </button>
-                  <span className="text-xs text-stone-400">
-                    {state.isVideoOff ? 'Show video' : 'Hide video'}
-                  </span>
+                  <span className="text-xs text-stone-400">{state.isMuted ? 'Unmute' : 'Mute'}</span>
                 </div>
-              )}
-            </div>
+
+                {/* End call */}
+                <div className="flex flex-col items-center gap-2">
+                  <button
+                    onClick={onEnd}
+                    className="w-16 h-16 rounded-full bg-rose-600 hover:bg-rose-700 flex items-center justify-center cursor-pointer shadow-2xl transition-all active:scale-95"
+                  >
+                    <PhoneOff className="w-7 h-7 text-white" />
+                  </button>
+                  <span className="text-xs text-stone-400">End</span>
+                </div>
+
+                {/* Video toggle â€” video calls only */}
+                {isVideo && (
+                  <div className="flex flex-col items-center gap-2">
+                    <button
+                      onClick={onToggleVideo}
+                      className={`w-14 h-14 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 ${
+                        state.isVideoOff ? 'bg-white text-stone-900' : 'bg-white/15 text-white hover:bg-white/25'
+                      }`}
+                    >
+                      {state.isVideoOff ? <VideoOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}
+                    </button>
+                    <span className="text-xs text-stone-400">{state.isVideoOff ? 'Show Video' : 'Hide Video'}</span>
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
       </div>

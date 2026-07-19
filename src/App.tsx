@@ -601,6 +601,10 @@ export default function App() {
         onEnd={webRTC.endCall}
         onToggleMute={webRTC.toggleMute}
         onToggleVideo={webRTC.toggleVideo}
+        onToggleSpeaker={webRTC.toggleSpeaker}
+        onFlipCamera={webRTC.flipCamera}
+        onShareScreen={webRTC.shareScreen}
+        onUpgradeToVideo={webRTC.upgradeToVideo}
       />
     </div>
   );

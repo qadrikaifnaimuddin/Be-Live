@@ -233,7 +233,7 @@ export default function MessagesScreen({
   const [callHistory, setCallHistory] = useState<CallHistoryRecord[]>([]);
   const [showCallHistory, setShowCallHistory] = useState(false);
 
-  // Load call history from DB on mount
+  // Load call history from DB on mount — with profile enrichment
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
     supabase
@@ -242,23 +242,45 @@ export default function MessagesScreen({
       .or(`caller_id.eq.${currentUser.id},receiver_id.eq.${currentUser.id}`)
       .order('created_at', { ascending: false })
       .limit(50)
-      .then(({ data }) => {
-        if (!data) return;
+      .then(async ({ data }) => {
+        if (!data || data.length === 0) return;
+        // Collect unique user IDs to enrich with profile data
+        const userIds = [...new Set(
+          data.flatMap((r: any) => [r.caller_id, r.receiver_id])
+            .filter((id: string) => id !== currentUser.id)
+        )];
+        let profiles: Record<string, { name: string; avatar: string; username: string }> = {};
+        if (userIds.length > 0 && supabase) {
+          const { data: profData } = await supabase
+            .from('profiles')
+            .select('id, name, username, avatar')
+            .in('id', userIds);
+          (profData || []).forEach((p: any) => {
+            profiles[p.id] = { name: p.name || p.username || 'Unknown', avatar: p.avatar || '', username: p.username || '' };
+          });
+        }
+        // Also include current user profile for completeness
+        profiles[currentUser.id] = {
+          name: currentUser.name || currentUser.username || 'You',
+          avatar: currentUser.avatar || '',
+          username: currentUser.username || '',
+        };
         setCallHistory(data.map((r: any) => ({
-          id:            r.id,
-          callerId:      r.caller_id,
-          callerName:   '',  // enriched on render via profile lookup if needed
-          callerAvatar:  '',
-          receiverId:    r.receiver_id,
-          receiverName:  '',
-          receiverAvatar:'',
-          type:          r.call_type,
-          status:        r.caller_id === currentUser.id ? (r.status === 'completed' ? 'outgoing' : r.status) : (r.status === 'completed' ? 'incoming' : r.status),
-          createdAt:     r.created_at,
-          duration:      r.duration,
+          id:             r.id,
+          callerId:       r.caller_id,
+          callerName:     profiles[r.caller_id]?.name || 'Unknown',
+          callerAvatar:   profiles[r.caller_id]?.avatar || '',
+          receiverId:     r.receiver_id,
+          receiverName:   profiles[r.receiver_id]?.name || 'Unknown',
+          receiverAvatar: profiles[r.receiver_id]?.avatar || '',
+          type:           r.call_type,
+          status:         r.caller_id === currentUser.id ? (r.status === 'completed' ? 'outgoing' : r.status) : (r.status === 'completed' ? 'incoming' : r.status),
+          createdAt:      r.created_at,
+          duration:       r.duration,
         })));
       });
-  }, [currentUser.id]);
+  }, [currentUser.id, currentUser.name, currentUser.username, currentUser.avatar]);
+
   const [showComingSoon, setShowComingSoon] = useState<'audio' | 'video' | null>(null);
   const [showInputMenu, setShowInputMenu] = useState(false);
 
@@ -985,25 +1007,36 @@ export default function MessagesScreen({
     }
   };
 
-  const handleDragStart = (e: React.MouseEvent | React.TouchEvent, msgId: string) => {
+  const handleDragStart = (e: React.MouseEvent | React.TouchEvent, msgId: string, isMyMsg: boolean) => {
     if (isSelectionMode) return;
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
     dragStartXRef.current = clientX;
     setActiveDragId(msgId);
   };
 
-  const handleDragMove = (e: React.MouseEvent | React.TouchEvent) => {
+  const handleDragMove = (e: React.MouseEvent | React.TouchEvent, isMyMsg: boolean) => {
     if (!activeDragId) return;
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
     const deltaX = clientX - dragStartXRef.current;
-    if (deltaX > 0) {
-      setDragX(Math.min(60, deltaX));
+    if (isMyMsg) {
+      // Own messages: swipe LEFT (negative delta) to reply
+      if (deltaX < 0) {
+        setDragX(Math.max(-60, deltaX));
+      }
+    } else {
+      // Other messages: swipe RIGHT (positive delta) to reply
+      if (deltaX > 0) {
+        setDragX(Math.min(60, deltaX));
+      }
     }
   };
 
-  const handleDragEnd = (msg: Message) => {
-    if (activeDragId === msg.id && dragX > 40) {
-      setReplyingToMessage(msg);
+  const handleDragEnd = (msg: Message, isMyMsg: boolean) => {
+    if (activeDragId === msg.id) {
+      const threshold = isMyMsg ? -40 : 40;
+      if (isMyMsg ? dragX < threshold : dragX > threshold) {
+        setReplyingToMessage(msg);
+      }
     }
     setActiveDragId(null);
     setDragX(0);
@@ -1924,7 +1957,12 @@ export default function MessagesScreen({
           {/* Rooms list */}
           <div className="flex-1 overflow-y-auto">
             {filteredRooms
-              .filter(r => activeSidebarTab === 'all' || r.type === activeSidebarTab || (activeSidebarTab === 'direct' && r.type === 'direct'))
+              .filter(r => {
+                if (activeSidebarTab === 'all') return true;
+                // Map tab names to actual DB room types (tab uses plural, DB uses singular)
+                const tabTypeMap: Record<string, string> = { direct: 'direct', groups: 'group', channels: 'channel' };
+                return r.type === tabTypeMap[activeSidebarTab];
+              })
               .map(room => {
                 const sel = selectedChat && 'type' in selectedChat && (selectedChat as ChatRoom).id === room.id;
                 const otherMemberId = room.type === 'direct' ? room.members.find(m => m !== currentUser.id) : null;
@@ -2061,14 +2099,14 @@ export default function MessagesScreen({
                       </button>
                       {showCallMenu && (
                         <>
-                          {/* Invisible full-screen backdrop to close menu on outside click */}
+                          {/* Invisible full-screen backdrop to close menu on outside pointer event */}
                           <div
                             className="fixed inset-0 z-20"
-                            onClick={() => setShowCallMenu(false)}
+                            onPointerDown={() => setShowCallMenu(false)}
                           />
                           <div className="absolute right-0 top-full mt-2 w-40 bg-stone-900 border border-stone-700 rounded-2xl p-1.5 shadow-2xl z-30 flex flex-col gap-1">
                             <button
-                              onMouseDown={(e) => {
+                              onPointerDown={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
                                 onStartCall?.(directTargetUser, 'audio');
@@ -2080,7 +2118,7 @@ export default function MessagesScreen({
                               Voice Call
                             </button>
                             <button
-                              onMouseDown={(e) => {
+                              onPointerDown={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
                                 onStartCall?.(directTargetUser, 'video');
@@ -2096,6 +2134,7 @@ export default function MessagesScreen({
                       )}
                     </div>
                   )}
+
                   <button onClick={() => setShowKeyVerification(!showKeyVerification)} className="p-2 text-stone-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-xl cursor-pointer" title="E2EE"><Lock className="w-4 h-4" /></button>
                 </div>
               </div>
@@ -2216,12 +2255,12 @@ export default function MessagesScreen({
                       <div
                         onMouseDown={(e) => {
                           startMessageHold(msg.id);
-                          handleDragStart(e, msg.id);
+                          handleDragStart(e, msg.id, me);
                         }}
-                        onMouseMove={handleDragMove}
-                        onMouseUp={(e) => {
+                        onMouseMove={(e) => handleDragMove(e, me)}
+                        onMouseUp={() => {
                           cancelMessageHold();
-                          handleDragEnd(msg);
+                          handleDragEnd(msg, me);
                         }}
                         onMouseLeave={() => {
                           cancelMessageHold();
@@ -2230,12 +2269,12 @@ export default function MessagesScreen({
                         }}
                         onTouchStart={(e) => {
                           startMessageHold(msg.id);
-                          handleDragStart(e, msg.id);
+                          handleDragStart(e, msg.id, me);
                         }}
-                        onTouchMove={handleDragMove}
+                        onTouchMove={(e) => handleDragMove(e, me)}
                         onTouchEnd={() => {
                           cancelMessageHold();
-                          handleDragEnd(msg);
+                          handleDragEnd(msg, me);
                         }}
                         onClick={(e) => {
                           if (isSelectionMode) {
@@ -2254,6 +2293,7 @@ export default function MessagesScreen({
                           transition: activeDragId === msg.id ? 'none' : 'transform 0.2s ease-out'
                         }}
                         className={`relative rounded-2xl px-3 py-2 cursor-pointer select-none transition-all ${me ? 'bg-violet-600 text-white rounded-br-sm' : 'bg-stone-800 text-stone-100 rounded-bl-sm'} ${msg.isPinned ? 'ring-1 ring-amber-500/40' : ''} ${isSelected ? 'ring-2 ring-rose-500 bg-rose-950/20' : ''}`}
+
                       >
                         {msg.mediaType === 'snap' && (
                           <button onClick={() => openSnap(msg)} className={`flex items-center gap-2 text-sm font-bold cursor-pointer ${msg.snapViewed && msg.senderId !== currentUser.id ? 'opacity-40' : ''}`}>
