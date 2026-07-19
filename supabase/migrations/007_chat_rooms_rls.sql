@@ -19,7 +19,6 @@ CREATE POLICY "Allow select for room members"
   TO authenticated
   USING (
     auth.uid() = creator_id 
-    OR auth.uid()::text = ANY(members)
     OR auth.uid() = ANY(members)
   );
 
@@ -37,6 +36,5 @@ CREATE POLICY "Allow update for room members"
   TO authenticated
   USING (
     auth.uid() = creator_id
-    OR auth.uid()::text = ANY(members)
     OR auth.uid() = ANY(members)
   );
