@@ -126,8 +126,6 @@ export default function SocialLoungeModal({
   onUpdateProfile, 
   onViewProfile 
 }: SocialLoungeModalProps) {
-  if (!isOpen || !currentUser) return null;
-
   // View States
   const [viewState, setViewState] = useState<'dashboard' | 'create' | 'room'>('dashboard');
   const [activeTab, setActiveTab] = useState<'stage' | 'sandbox' | 'ambient' | 'games' | 'snap'>('stage');
@@ -143,11 +141,12 @@ export default function SocialLoungeModal({
   const [activePoll, setActivePoll] = useState<any | null>(null);
   const [snaps, setSnaps] = useState<LoungeSnap[]>([]);
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
+  const [dbError, setDbError] = useState<string | null>(null);
 
   // Local user settings
   const [localMicOn, setLocalMicOn] = useState(true);
   const [localCameraOn, setLocalCameraOn] = useState(false);
-  const [localAnonymous, setLocalAnonymous] = useState(currentUser.isAnonymousMode || false);
+  const [localAnonymous, setLocalAnonymous] = useState(currentUser?.isAnonymousMode || false);
 
   // Forms / Input States
   const [roomSearchQuery, setRoomSearchQuery] = useState('');
@@ -351,6 +350,7 @@ export default function SocialLoungeModal({
         .order('created_at', { ascending: false });
         
       if (error) throw error;
+      setDbError(null);
       
       if (dbRooms) {
         const mappedRooms: LoungeRoom[] = await Promise.all(
@@ -406,12 +406,18 @@ export default function SocialLoungeModal({
         );
         setRooms(mappedRooms);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('[fetchLoungeRooms Error]:', err);
+      if (err.message && err.message.includes('schema cache')) {
+        setDbError("Lounge database tables not found. Please apply the migration '012_lounge_feature.sql' in your Supabase SQL Editor!");
+      } else {
+        setDbError(err.message || 'Failed to connect to Lounge database.');
+      }
     }
   };
 
   useEffect(() => {
+    if (!isOpen || !currentUser) return;
     fetchLoungeRooms();
 
     if (!isSupabaseConfigured || !supabase) return;
@@ -430,7 +436,7 @@ export default function SocialLoungeModal({
     return () => {
       supabase.removeChannel(roomsCh);
     };
-  }, [isOpen]);
+  }, [isOpen, currentUser]);
 
   // 2. Fetch Active Room State
   const fetchRoomState = async (roomId: string) => {
@@ -1443,6 +1449,16 @@ export default function SocialLoungeModal({
                   Create New Lounge
                 </button>
               </div>
+
+              {dbError && (
+                <div className="p-4 bg-rose-950/20 border border-rose-900/40 rounded-2xl flex items-start gap-3 text-left">
+                  <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
+                  <div>
+                    <h5 className="font-extrabold text-xs text-rose-400">Database Schema Cache Error</h5>
+                    <p className="text-[10px] text-rose-500/80 mt-1 leading-relaxed">{dbError}</p>
+                  </div>
+                </div>
+              )}
 
               {/* Lounge Listing Container */}
               <div className="flex-1 flex flex-col gap-4">
