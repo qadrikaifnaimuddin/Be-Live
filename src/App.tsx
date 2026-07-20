@@ -11,9 +11,10 @@ import { useFollowSystem } from './lib/useFollowSystem';
 import { useWebRTC, RemoteUser } from './lib/useWebRTC';
 import { User, Post, Story, Highlight } from './types';
 import { supabase, isSupabaseConfigured } from './lib/supabaseClient';
-import { MessageCircle, User as UserIcon, Bell, Search } from 'lucide-react';
+import { MessageCircle, User as UserIcon, Bell, Search, Coffee } from 'lucide-react';
+import SocialLoungeModal from './components/SocialLoungeModal';
 
-type AppTab = 'profile' | 'search' | 'messages' | 'notifications';
+type AppTab = 'profile' | 'search' | 'messages' | 'notifications' | 'lounge';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -617,6 +618,21 @@ export default function App() {
     navigate('/');
   };
 
+  const handleViewProfile = async (userId: string) => {
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('username')
+        .eq('id', userId)
+        .maybeSingle();
+      if (data?.username) {
+        navigate(`/${data.username}`);
+      }
+    } catch (err) {
+      console.error('[handleViewProfile Error]:', err);
+    }
+  };
+
   const mainApp = (
     <div className="min-h-screen bg-[#070605] text-stone-100 font-sans selection:bg-[#C4B99D] selection:text-stone-950">
       {!currentUser ? (
@@ -739,6 +755,16 @@ export default function App() {
                 </button>
 
                 <button
+                  onClick={() => setActiveTab('lounge')}
+                  className={`flex flex-col items-center gap-1 px-4 py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'lounge' ? 'text-amber-400' : 'text-stone-600 hover:text-stone-400'}`}
+                >
+                  <div className={`p-2 rounded-xl transition-all ${activeTab === 'lounge' ? 'bg-amber-500/20' : ''}`}>
+                    <Coffee className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider">Lounge</span>
+                </button>
+
+                <button
                   onClick={() => setActiveTab('notifications')}
                   className={`flex flex-col items-center gap-1 px-4 py-2 rounded-2xl transition-all cursor-pointer relative ${activeTab === 'notifications' ? 'text-amber-400' : 'text-stone-600 hover:text-stone-400'}`}
                 >
@@ -758,6 +784,15 @@ export default function App() {
           )}
         </div>
       )}
+
+      {/* ── Social Lounge Overlay Modal ── */}
+      <SocialLoungeModal
+        isOpen={activeTab === 'lounge'}
+        onClose={() => setActiveTab('profile')}
+        currentUser={currentUser}
+        users={[]}
+        onViewProfile={handleViewProfile}
+      />
 
       {/* ── Global Call Overlay — renders over every screen ── */}
       <CallOverlay
