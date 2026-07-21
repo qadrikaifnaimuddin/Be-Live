@@ -100,6 +100,7 @@ export default function StrangerChatModal({
   const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
   const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const disconnectMonitorChRef = useRef<any>(null);
+  const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Clean up WebRTC session & channel connections
   const cleanUpSession = async (shouldCleanDB = true) => {
@@ -108,6 +109,11 @@ export default function StrangerChatModal({
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
+    if (pingIntervalRef.current) {
+      clearInterval(pingIntervalRef.current);
+      pingIntervalRef.current = null;
+    }
+
     setRemoteStream(null);
     if (connectionTimeoutRef.current) {
       clearTimeout(connectionTimeoutRef.current);
@@ -336,6 +342,10 @@ export default function StrangerChatModal({
           clearTimeout(connectionTimeoutRef.current);
           connectionTimeoutRef.current = null;
         }
+        if (pingIntervalRef.current) {
+          clearInterval(pingIntervalRef.current);
+          pingIntervalRef.current = null;
+        }
       }
     };
 
@@ -372,8 +382,31 @@ export default function StrangerChatModal({
     signalChannelRef.current = signalCh;
 
     signalCh
+      .on('broadcast', { event: 'ready-ping' }, async ({ payload }) => {
+        if (payload.from !== currentUser?.id) {
+          console.log("[StrangerChat] Received ready-ping from partner.");
+          if (isInitiator) {
+            if (pingIntervalRef.current) {
+              clearInterval(pingIntervalRef.current);
+              pingIntervalRef.current = null;
+            }
+            // Create and send offer
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            signalCh.send({
+              type: 'broadcast',
+              event: 'offer',
+              payload: { sdp: offer, from: currentUser?.id }
+            });
+          }
+        }
+      })
       .on('broadcast', { event: 'offer' }, async ({ payload }) => {
         if (payload.from !== currentUser?.id) {
+          if (pingIntervalRef.current) {
+            clearInterval(pingIntervalRef.current);
+            pingIntervalRef.current = null;
+          }
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
@@ -387,6 +420,10 @@ export default function StrangerChatModal({
       })
       .on('broadcast', { event: 'answer' }, async ({ payload }) => {
         if (payload.from !== currentUser?.id) {
+          if (pingIntervalRef.current) {
+            clearInterval(pingIntervalRef.current);
+            pingIntervalRef.current = null;
+          }
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
         }
       })
@@ -413,14 +450,22 @@ export default function StrangerChatModal({
         }
       })
       .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED' && isInitiator) {
-          // If initiator, trigger SDP offer exchange
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
+        if (status === 'SUBSCRIBED') {
+          // Both peers start sending ready-pings until offer is sent/received
+          if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+          pingIntervalRef.current = setInterval(() => {
+            signalCh.send({
+              type: 'broadcast',
+              event: 'ready-ping',
+              payload: { from: currentUser?.id }
+            });
+          }, 1000);
+          
+          // Send initial ping immediately
           signalCh.send({
             type: 'broadcast',
-            event: 'offer',
-            payload: { sdp: offer, from: currentUser?.id }
+            event: 'ready-ping',
+            payload: { from: currentUser?.id }
           });
         }
       });
@@ -1001,7 +1046,7 @@ export default function StrangerChatModal({
                       </div>
 
                       {/* Device Media Toggles overlay */}
-                      <div className="absolute bottom-3 right-3 bg-stone-950/80 backdrop-blur-md border border-stone-850 p-1.5 rounded-xl flex items-center gap-1.5 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="absolute bottom-3 right-3 bg-stone-950/80 backdrop-blur-md border border-stone-850 p-1.5 rounded-xl flex items-center gap-1.5 z-10 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                         <button
                           onClick={toggleCamera}
                           className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
