@@ -716,7 +716,7 @@ export default function StrangerChatModal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/95 backdrop-blur-md p-4 overflow-hidden"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/95 backdrop-blur-md p-0 sm:p-4 overflow-hidden"
         >
           <motion.div
             id="stranger_chat_modal_content"
@@ -724,10 +724,10 @@ export default function StrangerChatModal({
             animate={{ scale: 1, y: 0 }}
             exit={{ scale: 0.95, y: 15 }}
             transition={{ type: "spring", damping: 25, stiffness: 350 }}
-            className="w-full max-w-5xl h-[85vh] bg-stone-900 border border-stone-850 rounded-3xl flex flex-col overflow-hidden shadow-2xl relative"
+            className="w-full sm:max-w-5xl h-full sm:h-[85vh] bg-stone-900 border-0 sm:border border-stone-850 rounded-none sm:rounded-3xl flex flex-col overflow-hidden shadow-2xl relative"
           >
             {/* Top Bar Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-stone-850 bg-stone-900/50 shrink-0 z-10">
+            <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b border-stone-850 bg-stone-900/50 shrink-0 z-10">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-pink-500/10 border border-pink-500/20 text-pink-400 rounded-2xl">
                   <Globe className="w-5 h-5 animate-pulse text-pink-500" />
@@ -808,7 +808,9 @@ export default function StrangerChatModal({
               
               {/* Left Column: Interests / Video Stream Screens */}
               <div className={`flex-1 flex flex-col overflow-hidden ${
-                matchState === 'idle' ? 'md:max-w-md border-r border-stone-850' : (chatMode === 'video' ? 'md:flex-[1.2] border-r border-stone-850' : 'hidden')
+                matchState === 'idle' 
+                  ? 'md:max-w-md border-b border-stone-850 md:border-b-0 md:border-r' 
+                  : (chatMode === 'video' ? 'md:flex-[1.2] border-b border-stone-850 md:border-b-0 md:border-r' : 'hidden')
               }`}>
                 {matchState === 'idle' ? (
                   /* Matching Configuration Settings Dashboard */
@@ -920,10 +922,10 @@ export default function StrangerChatModal({
                   </div>
                 ) : (
                   /* Active Media Feeds Screen Panel */
-                  <div className="flex-1 flex flex-col p-4 bg-stone-950 gap-4 overflow-y-auto">
+                  <div className="flex-1 flex flex-row md:flex-col p-3 sm:p-4 bg-stone-950 gap-3 sm:gap-4 overflow-hidden">
                     
                     {/* Stranger remote stream */}
-                    <div className="flex-1 min-h-[160px] bg-stone-900 border border-stone-850 rounded-2xl overflow-hidden relative flex flex-col justify-center items-center group">
+                    <div className="flex-1 min-h-[120px] md:min-h-[160px] h-full bg-stone-900 border border-stone-850 rounded-2xl overflow-hidden relative flex flex-col justify-center items-center group">
                       {remoteStream ? (
                         <video
                           ref={remoteVideoRef}
@@ -949,7 +951,7 @@ export default function StrangerChatModal({
                     </div>
 
                     {/* Local Stream Screen */}
-                    <div className="flex-1 min-h-[160px] bg-stone-900 border border-stone-850 rounded-2xl overflow-hidden relative flex flex-col justify-center items-center group">
+                    <div className="flex-1 min-h-[120px] md:min-h-[160px] h-full bg-stone-900 border border-stone-850 rounded-2xl overflow-hidden relative flex flex-col justify-center items-center group">
                       {cameraOn ? (
                         <video
                           ref={localVideoRef}

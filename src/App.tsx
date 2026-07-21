@@ -727,71 +727,71 @@ export default function App() {
           {/* ── Bottom Navigation ── */}
           {!(activeTab === 'messages' && isChatActive) && tab !== 'search' && (
             <nav className="fixed bottom-0 left-0 right-0 z-20 bg-stone-950/95 border-t border-stone-900 backdrop-blur-lg">
-              <div className="flex items-center justify-around py-2 max-w-lg mx-auto">
+              <div className="flex items-center justify-around py-1.5 sm:py-2 max-w-lg mx-auto">
 
                 <button
                   onClick={() => setActiveTab('profile')}
-                  className={`flex flex-col items-center gap-1 px-4 py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'profile' ? 'text-stone-100' : 'text-stone-600 hover:text-stone-400'}`}
+                  className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1.5 sm:px-4 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'profile' ? 'text-stone-100' : 'text-stone-600 hover:text-stone-400'}`}
                 >
-                  <div className={`p-2 rounded-xl transition-all ${activeTab === 'profile' ? 'bg-stone-800' : ''}`}>
-                    <UserIcon className="w-5 h-5" />
+                  <div className={`p-1.5 sm:p-2 rounded-xl transition-all ${activeTab === 'profile' ? 'bg-stone-800' : ''}`}>
+                    <UserIcon className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
                   </div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider">Profile</span>
+                  <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider hidden sm:block">Profile</span>
                 </button>
 
                 <button
                   onClick={() => setActiveTab('search')}
-                  className={`flex flex-col items-center gap-1 px-4 py-2 rounded-2xl transition-all cursor-pointer ${tab === 'search' ? 'text-emerald-400' : 'text-stone-600 hover:text-stone-400'}`}
+                  className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1.5 sm:px-4 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer ${tab === 'search' ? 'text-emerald-400' : 'text-stone-600 hover:text-stone-400'}`}
                 >
-                  <div className={`p-2 rounded-xl transition-all ${tab === 'search' ? 'bg-emerald-500/20' : ''}`}>
-                    <Search className="w-5 h-5" />
+                  <div className={`p-1.5 sm:p-2 rounded-xl transition-all ${tab === 'search' ? 'bg-emerald-500/20' : ''}`}>
+                    <Search className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
                   </div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider">Search</span>
+                  <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider hidden sm:block">Search</span>
                 </button>
 
                 <button
                   onClick={() => setActiveTab('messages')}
-                  className={`flex flex-col items-center gap-1 px-4 py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'messages' ? 'text-violet-400' : 'text-stone-600 hover:text-stone-400'}`}
+                  className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1.5 sm:px-4 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'messages' ? 'text-violet-400' : 'text-stone-600 hover:text-stone-400'}`}
                 >
-                  <div className={`p-2 rounded-xl transition-all ${activeTab === 'messages' ? 'bg-violet-500/20' : ''}`}>
-                    <MessageCircle className="w-5 h-5" />
+                  <div className={`p-1.5 sm:p-2 rounded-xl transition-all ${activeTab === 'messages' ? 'bg-violet-500/20' : ''}`}>
+                    <MessageCircle className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
                   </div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider">Messages</span>
+                  <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider hidden sm:block">Messages</span>
                 </button>
 
                 <button
                   onClick={() => setActiveTab('stranger_chat')}
-                  className={`flex flex-col items-center gap-1 px-4 py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'stranger_chat' ? 'text-pink-400' : 'text-stone-600 hover:text-stone-400'}`}
+                  className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1.5 sm:px-4 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'stranger_chat' ? 'text-pink-400' : 'text-stone-600 hover:text-stone-400'}`}
                 >
-                  <div className={`p-2 rounded-xl transition-all ${activeTab === 'stranger_chat' ? 'bg-pink-500/20' : ''}`}>
-                    <Shuffle className="w-5 h-5" />
+                  <div className={`p-1.5 sm:p-2 rounded-xl transition-all ${activeTab === 'stranger_chat' ? 'bg-pink-500/20' : ''}`}>
+                    <Shuffle className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
                   </div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider">Stranger</span>
+                  <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider hidden sm:block">Stranger</span>
                 </button>
 
                 <button
                   onClick={() => setActiveTab('lounge')}
-                  className={`flex flex-col items-center gap-1 px-4 py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'lounge' ? 'text-amber-400' : 'text-stone-600 hover:text-stone-400'}`}
+                  className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1.5 sm:px-4 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'lounge' ? 'text-amber-400' : 'text-stone-600 hover:text-stone-400'}`}
                 >
-                  <div className={`p-2 rounded-xl transition-all ${activeTab === 'lounge' ? 'bg-amber-500/20' : ''}`}>
-                    <Coffee className="w-5 h-5" />
+                  <div className={`p-1.5 sm:p-2 rounded-xl transition-all ${activeTab === 'lounge' ? 'bg-amber-500/20' : ''}`}>
+                    <Coffee className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
                   </div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider">Lounge</span>
+                  <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider hidden sm:block">Lounge</span>
                 </button>
 
                 <button
                   onClick={() => setActiveTab('notifications')}
-                  className={`flex flex-col items-center gap-1 px-4 py-2 rounded-2xl transition-all cursor-pointer relative ${activeTab === 'notifications' ? 'text-amber-400' : 'text-stone-600 hover:text-stone-400'}`}
+                  className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1.5 sm:px-4 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer relative ${activeTab === 'notifications' ? 'text-amber-400' : 'text-stone-600 hover:text-stone-400'}`}
                 >
-                  <div className={`relative p-2 rounded-xl transition-all ${activeTab === 'notifications' ? 'bg-amber-500/20' : ''}`}>
-                    <Bell className="w-5 h-5" />
+                  <div className={`relative p-1.5 sm:p-2 rounded-xl transition-all ${activeTab === 'notifications' ? 'bg-amber-500/20' : ''}`}>
+                    <Bell className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
                     {followSystem.unreadCount > 0 && (
                       <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 bg-rose-600 text-white text-[9px] font-black rounded-full flex items-center justify-center">
                         {followSystem.unreadCount > 99 ? '99+' : followSystem.unreadCount}
                       </span>
                     )}
                   </div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider">Activity</span>
+                  <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider hidden sm:block">Activity</span>
                 </button>
 
               </div>
