@@ -247,6 +247,7 @@ export interface LoungeRoomParticipant {
   isMicOn: boolean;
   isCameraOn: boolean;
   isMutedByAdmin?: boolean;
+  isCameraDisabledByAdmin?: boolean;
   isAnonymous?: boolean;
 }
 

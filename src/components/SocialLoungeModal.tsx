@@ -206,6 +206,10 @@ export default function SocialLoungeModal({
   const [ambientVolume, setAmbientVolume] = useState<number>(50);
   const [isAmbientPlaying, setIsAmbientPlaying] = useState(false);
 
+  // Host Leaving / Life cycle states
+  const [showLeaveOptions, setShowLeaveOptions] = useState(false);
+  const [showTransferStarSelection, setShowTransferStarSelection] = useState(false);
+
   // User Profile popup
   const [selectedLoungeProfile, setSelectedLoungeProfile] = useState<User | null>(null);
   const [highFivesSent, setHighFivesSent] = useState<Record<string, number>>({});
@@ -382,6 +386,7 @@ export default function SocialLoungeModal({
               isMicOn: p.is_mic_on,
               isCameraOn: p.is_camera_on,
               isMutedByAdmin: p.is_muted_by_admin,
+              isCameraDisabledByAdmin: p.is_camera_disabled_by_admin,
               isAnonymous: p.is_anonymous
             }));
 
@@ -415,6 +420,30 @@ export default function SocialLoungeModal({
       }
     }
   };
+
+  useEffect(() => {
+    if (currentUser) {
+      setLocalAnonymous(currentUser.isAnonymousMode || false);
+    }
+  }, [currentUser]);
+
+  // Monitor room participants state for admin blocks (mute/camera disables)
+  useEffect(() => {
+    if (!currentUser || !activeRoom) return;
+    const localPart = roomParticipants.find(p => p.userId === currentUser.id);
+    if (localPart) {
+      if (localPart.isMutedByAdmin && localMicOn) {
+        setLocalMicOn(false);
+        playSynthSound('buzzer');
+        alert("The host has muted your microphone.");
+      }
+      if (localPart.isCameraDisabledByAdmin && localCameraOn) {
+        setLocalCameraOn(false);
+        playSynthSound('buzzer');
+        alert("The host has disabled your camera.");
+      }
+    }
+  }, [roomParticipants, currentUser, activeRoom, localMicOn, localCameraOn]);
 
   useEffect(() => {
     if (!isOpen || !currentUser) return;
@@ -457,6 +486,7 @@ export default function SocialLoungeModal({
         isMicOn: p.is_mic_on,
         isCameraOn: p.is_camera_on,
         isMutedByAdmin: p.is_muted_by_admin,
+        isCameraDisabledByAdmin: p.is_camera_disabled_by_admin,
         isAnonymous: p.is_anonymous
       }));
       setRoomParticipants(pList);
@@ -615,7 +645,7 @@ export default function SocialLoungeModal({
             });
             
             // Speak custom synthesizer tone if selected voice filter isn't normal
-            if (mapped.custom_voice_profile && mapped.custom_voice_profile !== 'normal' && mapped.sender_id !== currentUser.id) {
+            if (mapped.custom_voice_profile && mapped.custom_voice_profile !== 'normal' && mapped.sender_id !== currentUser?.id) {
               speakProceduralVocal(mapped.custom_voice_profile);
             }
           });
@@ -1034,8 +1064,9 @@ export default function SocialLoungeModal({
         active: true
       });
 
-    } catch (err) {
+    } catch (err: any) {
       console.error('[handleCreateLoungeRoom Error]:', err);
+      alert(`Error launching room: ${err.message || err.details || JSON.stringify(err)}`);
     }
   };
 
@@ -1062,17 +1093,25 @@ export default function SocialLoungeModal({
       fetchRoomState(room.id);
       setActiveRoom(room);
 
-    } catch (err) {
+    } catch (err: any) {
       console.error('[handleJoinLoungeRoom Error]:', err);
+      alert(`Error joining room: ${err.message || err.details || JSON.stringify(err)}`);
     }
   };
 
-  const handleLeaveLoungeRoom = async () => {
-    if (!activeRoom || !isSupabaseConfigured || !supabase) return;
-    playSynthSound('laser');
+  const resetLocalLoungeState = () => {
+    setViewState('dashboard');
+    setActiveRoom(null);
+    setRoomParticipants([]);
+    setMessages([]);
+    setDoodleLines([]);
+    setSandboxItems([]);
+    fetchLoungeRooms();
+  };
 
+  const leaveLoungeQueryOnly = async () => {
+    if (!activeRoom || !isSupabaseConfigured || !supabase) return;
     try {
-      // 1. Remove from participants
       const { error: leaveErr } = await supabase
         .from('lounge_participants')
         .delete()
@@ -1080,30 +1119,68 @@ export default function SocialLoungeModal({
         .eq('user_id', currentUser.id);
 
       if (leaveErr) throw leaveErr;
-
-      // 2. If host leaves, make room inactive
-      if (activeRoom.hostId === currentUser.id) {
-        await supabase
-          .from('lounge_rooms')
-          .update({ active: false })
-          .eq('id', activeRoom.id);
-      }
-
-      setViewState('dashboard');
-      setActiveRoom(null);
-      setRoomParticipants([]);
-      setMessages([]);
-      setDoodleLines([]);
-      setSandboxItems([]);
-      fetchLoungeRooms();
-
-    } catch (err) {
-      console.error('[handleLeaveLoungeRoom Error]:', err);
+      resetLocalLoungeState();
+    } catch (err: any) {
+      console.error('[leaveLoungeQueryOnly Error]:', err);
+      alert(`Error leaving room: ${err.message || err.details || JSON.stringify(err)}`);
     }
+  };
+
+  const destroyLoungeRoomForever = async () => {
+    if (!activeRoom || !isSupabaseConfigured || !supabase) return;
+    try {
+      await supabase
+        .from('lounge_rooms')
+        .delete()
+        .eq('id', activeRoom.id);
+      resetLocalLoungeState();
+    } catch (err: any) {
+      console.error('[destroyLoungeRoomForever Error]:', err);
+      alert(`Error destroying room: ${err.message || err.details || JSON.stringify(err)}`);
+    }
+  };
+
+  const handleTransferAndLeave = async (targetUserId: string) => {
+    if (!activeRoom || !isSupabaseConfigured || !supabase) return;
+    try {
+      await handleHostPromoteParticipant(targetUserId);
+      await leaveLoungeQueryOnly();
+    } catch (err: any) {
+      console.error('[handleTransferAndLeave Error]:', err);
+    }
+  };
+
+  const handleLeaveLoungeRoom = async () => {
+    if (!activeRoom || !isSupabaseConfigured || !supabase) return;
+    playSynthSound('laser');
+
+    // If we are the absolute last person, destroy the lounge forever
+    if (roomParticipants.length <= 1) {
+      await destroyLoungeRoomForever();
+      return;
+    }
+
+    // If we are the host, present options to destroy or transfer ownership
+    if (activeRoom.hostId === currentUser?.id) {
+      setShowLeaveOptions(true);
+      return;
+    }
+
+    // Otherwise, we are a normal participant, we can leave safely
+    await leaveLoungeQueryOnly();
   };
 
   // Toggle user audio/video states
   const handleToggleMic = async () => {
+    if (activeRoom && currentUser) {
+      const localPart = roomParticipants.find(p => p.userId === currentUser.id);
+      if (localPart?.isMutedByAdmin) {
+        playSynthSound('buzzer');
+        alert("You cannot unmute because the host has muted you.");
+        return;
+      }
+    }
+
     const nextMic = !localMicOn;
     setLocalMicOn(nextMic);
     playSynthSound('coin');
@@ -1118,6 +1195,15 @@ export default function SocialLoungeModal({
   };
 
   const handleToggleCamera = async () => {
+    if (activeRoom && currentUser) {
+      const localPart = roomParticipants.find(p => p.userId === currentUser.id);
+      if (localPart?.isCameraDisabledByAdmin) {
+        playSynthSound('buzzer');
+        alert("You cannot activate your camera because the host has disabled it.");
+        return;
+      }
+    }
+
     const nextCam = !localCameraOn;
     setLocalCameraOn(nextCam);
     playSynthSound('coin');
@@ -1139,9 +1225,33 @@ export default function SocialLoungeModal({
     const part = roomParticipants.find(p => p.userId === targetUserId);
     if (!part) return;
 
+    const nextMuted = !part.isMutedByAdmin;
+
     await supabase
       .from('lounge_participants')
-      .update({ is_mic_on: false, is_muted_by_admin: true })
+      .update({ 
+        is_mic_on: nextMuted ? false : part.isMicOn,
+        is_muted_by_admin: nextMuted 
+      })
+      .eq('room_id', activeRoom.id)
+      .eq('user_id', targetUserId);
+  };
+
+  const handleHostToggleCameraParticipant = async (targetUserId: string) => {
+    if (!activeRoom || !isSupabaseConfigured || !supabase) return;
+    playSynthSound('laser');
+
+    const part = roomParticipants.find(p => p.userId === targetUserId);
+    if (!part) return;
+
+    const nextDisabled = !part.isCameraDisabledByAdmin;
+
+    await supabase
+      .from('lounge_participants')
+      .update({ 
+        is_camera_on: nextDisabled ? false : part.isCameraOn,
+        is_camera_disabled_by_admin: nextDisabled 
+      })
       .eq('room_id', activeRoom.id)
       .eq('user_id', targetUserId);
   };
@@ -1390,6 +1500,8 @@ export default function SocialLoungeModal({
         return 'font-sans text-white font-extrabold tracking-wider uppercase leading-tight [text-shadow:_-1.5px_-1.5px_0_#000,_1.5px_-1.5px_0_#000,_-1.5px_1.5px_0_#000,_1.5px_1.5px_0_#000]';
     }
   };
+
+  if (!isOpen || !currentUser) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-0 md:p-6 bg-black/80 backdrop-blur-md select-none text-stone-100 font-sans">
@@ -1758,18 +1870,38 @@ export default function SocialLoungeModal({
                                     <Settings className="w-3 h-3" />
                                   </button>
                                   {openHostMenuUserId === part.userId && (
-                                    <div className="absolute right-0 mt-1 bg-stone-950 border border-stone-850 rounded-lg py-1 shadow-lg text-left w-24 text-[8px] z-30 font-bold">
+                                    <div className="absolute right-0 mt-1 bg-stone-950 border border-stone-850 rounded-lg py-1 shadow-lg text-left w-28 text-[8px] z-30 font-bold">
+                                      <button
+                                        onClick={() => { handleHostPromoteParticipant(part.userId); setOpenHostMenuUserId(null); }}
+                                        className="w-full px-2 py-1.5 hover:bg-stone-900 text-amber-400 hover:text-amber-300 flex items-center gap-1 cursor-pointer border-b border-stone-900"
+                                      >
+                                        👑 Make Host
+                                      </button>
                                       <button
                                         onClick={() => { handleHostToggleMuteParticipant(part.userId); setOpenHostMenuUserId(null); }}
                                         className="w-full px-2 py-1.5 hover:bg-stone-900 text-stone-200 hover:text-white flex items-center gap-1 cursor-pointer"
                                       >
-                                        <MicOff className="w-2.5 h-2.5" /> Mute
+                                        {part.isMutedByAdmin ? (
+                                          <><Mic className="w-2.5 h-2.5 text-emerald-500" /> Unmute</>
+                                        ) : (
+                                          <><MicOff className="w-2.5 h-2.5 text-stone-400" /> Mute</>
+                                        )}
+                                      </button>
+                                      <button
+                                        onClick={() => { handleHostToggleCameraParticipant(part.userId); setOpenHostMenuUserId(null); }}
+                                        className="w-full px-2 py-1.5 hover:bg-stone-900 text-stone-200 hover:text-white flex items-center gap-1 cursor-pointer border-t border-stone-900"
+                                      >
+                                        {part.isCameraDisabledByAdmin ? (
+                                          <><Video className="w-2.5 h-2.5 text-teal-500" /> Enable Video</>
+                                        ) : (
+                                          <><VideoOff className="w-2.5 h-2.5 text-stone-400" /> Stop Video</>
+                                        )}
                                       </button>
                                       <button
                                         onClick={() => { handleHostKickParticipant(part.userId); setOpenHostMenuUserId(null); }}
                                         className="w-full px-2 py-1.5 hover:bg-stone-900 text-rose-400 hover:text-rose-300 flex items-center gap-1 border-t border-stone-900 cursor-pointer"
                                       >
-                                        <UserX className="w-2.5 h-2.5" /> Kick
+                                        <UserX className="w-2.5 h-2.5" /> Kick Out
                                       </button>
                                     </div>
                                   )}
@@ -2417,134 +2549,234 @@ export default function SocialLoungeModal({
               </div>
             </div>
           )}
-            {/* User Profile Popover Modal */}
-            <AnimatePresence>
-              {selectedLoungeProfile && (
-                <div
-                  className="absolute inset-0 z-50 bg-stone-950/80 backdrop-blur-sm flex items-center justify-center p-4 text-center"
-                  onClick={() => setSelectedLoungeProfile(null)}
+
+          {/* User Profile Popover Modal */}
+          <AnimatePresence>
+            {selectedLoungeProfile && (
+              <div
+                className="absolute inset-0 z-50 bg-stone-950/80 backdrop-blur-sm flex items-center justify-center p-4 text-center"
+                onClick={() => setSelectedLoungeProfile(null)}
+              >
+                <motion.div
+                  initial={{ scale: 0.9, y: 20 }}
+                  animate={{ scale: 1, y: 0 }}
+                  exit={{ scale: 0.9, y: 20 }}
+                  className="bg-stone-900 border border-stone-850 rounded-3xl p-6 shadow-2xl relative max-w-sm w-full text-left"
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  <motion.div
-                    initial={{ scale: 0.9, y: 20 }}
-                    animate={{ scale: 1, y: 0 }}
-                    exit={{ scale: 0.9, y: 20 }}
-                    className="bg-stone-900 border border-stone-850 rounded-3xl p-6 shadow-2xl relative max-w-sm w-full text-left"
-                    onClick={(e) => e.stopPropagation()}
+                  <button 
+                    onClick={() => setSelectedLoungeProfile(null)}
+                    className="absolute top-4 right-4 p-1.5 rounded-xl bg-stone-950 hover:bg-stone-850 text-stone-400 hover:text-stone-200 border border-stone-800 transition-all cursor-pointer"
                   >
-                    <button 
-                      onClick={() => setSelectedLoungeProfile(null)}
-                      className="absolute top-4 right-4 p-1.5 rounded-xl bg-stone-950 hover:bg-stone-800 text-stone-400 hover:text-stone-200 border border-stone-800 transition-all cursor-pointer"
+                    <X className="w-4 h-4" />
+                  </button>
+
+                  <div className="flex flex-col items-center text-center mt-2 mb-4">
+                    <div className="relative">
+                      {selectedLoungeProfile.avatar ? (
+                        <img
+                          src={selectedLoungeProfile.avatar}
+                          alt={selectedLoungeProfile.username}
+                          className="w-20 h-20 rounded-full object-cover border-4 border-stone-850 bg-neutral-800 shadow-xl"
+                        />
+                      ) : (
+                        <div className="w-20 h-20 rounded-full bg-stone-800 flex items-center justify-center text-4xl shadow-xl border-4 border-stone-850">
+                          👤
+                        </div>
+                      )}
+                      <span className="absolute bottom-0 right-0 w-5 h-5 bg-emerald-500 border-2 border-stone-900 rounded-full flex items-center justify-center text-[9px] font-bold text-white">●</span>
+                    </div>
+
+                    <h3 className="font-extrabold text-base text-stone-100 mt-3">
+                      {selectedLoungeProfile.name}
+                    </h3>
+                    <p className="text-xs text-stone-400 font-mono">
+                      @{selectedLoungeProfile.username}
+                    </p>
+
+                    <p className="text-xs text-stone-300 px-4 mt-3 leading-relaxed italic text-center">
+                      "{selectedLoungeProfile.bio || 'Exploring the live chat lounge.'}"
+                    </p>
+                  </div>
+
+                  {/* Stats rows */}
+                  <div className="grid grid-cols-2 gap-2 py-3 border-y border-stone-850 my-4 text-center">
+                    <div className="border-r border-stone-850">
+                      <strong className="text-stone-100 text-sm font-extrabold block">
+                        {selectedLoungeProfile.followers?.length || 0}
+                      </strong>
+                      <span className="text-[9px] uppercase tracking-wider font-extrabold text-stone-400">Followers</span>
+                    </div>
+                    <div>
+                      <strong className="text-stone-100 text-sm font-extrabold block">
+                        {selectedLoungeProfile.following?.length || 0}
+                      </strong>
+                      <span className="text-[9px] uppercase tracking-wider font-extrabold text-stone-400">Following</span>
+                    </div>
+                  </div>
+
+                  <div className="bg-stone-950/50 rounded-2xl p-3 flex items-center justify-between mb-4 border border-stone-850">
+                    <div className="flex items-center gap-2">
+                      <div className="p-2 rounded-xl bg-gradient-to-tr from-amber-500 to-rose-500 text-stone-950 shadow">
+                        <Hand className="w-4 h-4" />
+                      </div>
+                      <div className="text-left">
+                        <span className="text-[8px] text-stone-500 font-extrabold block uppercase tracking-wider">High-Fives Exchanged</span>
+                        <span className="text-[10px] font-bold text-stone-300">
+                          You sent {highFivesSent[selectedLoungeProfile.id] || 0} high-fives
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={async () => {
+                        playSynthSound('coin');
+                        setHighFivesSent(prev => ({
+                          ...prev,
+                          [selectedLoungeProfile.id]: (prev[selectedLoungeProfile.id] || 0) + 1
+                        }));
+
+                        // Broadcast/insert high five message
+                        if (activeRoom && isSupabaseConfigured && supabase) {
+                          await supabase
+                            .from('lounge_messages')
+                            .insert({
+                              room_id: activeRoom.id,
+                              sender_id: currentUser.id,
+                              text: `✋ sent @${selectedLoungeProfile.username} a warm high-five!`
+                            });
+                        }
+                      }}
+                      className="px-2.5 py-1.5 bg-amber-500 text-stone-950 font-black rounded-lg text-[9px] transition-all cursor-pointer active:scale-95"
                     >
-                      <X className="w-4 h-4" />
+                      Wave ✋
                     </button>
+                  </div>
 
-                    <div className="flex flex-col items-center text-center mt-2 mb-4">
-                      <div className="relative">
-                        {selectedLoungeProfile.avatar ? (
-                          <img
-                            src={selectedLoungeProfile.avatar}
-                            alt={selectedLoungeProfile.username}
-                            className="w-20 h-20 rounded-full object-cover border-4 border-stone-850 bg-neutral-800 shadow-xl"
-                          />
-                        ) : (
-                          <div className="w-20 h-20 rounded-full bg-stone-800 flex items-center justify-center text-4xl shadow-xl border-4 border-stone-850">
-                            👤
-                          </div>
-                        )}
-                        <span className="absolute bottom-0 right-0 w-5 h-5 bg-emerald-500 border-2 border-stone-900 rounded-full flex items-center justify-center text-[9px] font-bold text-white">●</span>
-                      </div>
+                  <div className="grid grid-cols-2 gap-3 mt-4">
+                    <button
+                      onClick={() => setSelectedLoungeProfile(null)}
+                      className="py-2 rounded-xl bg-stone-950 border border-stone-850 text-stone-400 hover:text-stone-200 font-bold text-xs text-center transition-all cursor-pointer"
+                    >
+                      Keep Browsing
+                    </button>
+                    <button
+                      onClick={() => {
+                        const profileId = selectedLoungeProfile.id;
+                        setSelectedLoungeProfile(null);
+                        onClose();
+                        if (onViewProfile) {
+                          onViewProfile(profileId);
+                        }
+                      }}
+                      className="py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 text-stone-950 font-black text-xs flex items-center justify-center gap-1 transition-all cursor-pointer shadow-md"
+                    >
+                      <span>Full Profile</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
 
-                      <h3 className="font-extrabold text-base text-stone-100 mt-3">
-                        {selectedLoungeProfile.name}
-                      </h3>
-                      <p className="text-xs text-stone-400 font-mono">
-                        @{selectedLoungeProfile.username}
-                      </p>
+          {/* ── Host Leave Options Overlay ── */}
+          <AnimatePresence>
+            {showLeaveOptions && (
+              <div className="absolute inset-0 bg-stone-950/90 backdrop-blur-md z-50 flex items-center justify-center p-6 text-center">
+                <motion.div
+                  initial={{ scale: 0.95, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.95, opacity: 0 }}
+                  className="bg-stone-900 border border-stone-850 rounded-3xl p-6 max-w-sm w-full text-left relative"
+                >
+                  <h3 className="font-extrabold text-sm text-stone-100 mb-2">Leave Lounge Room? 🎙️</h3>
+                  <p className="text-xs text-stone-400 mb-6 leading-relaxed">
+                    You are the host of this lounge. Leaving will either end the session for everyone, or you can transfer the star to another participant first.
+                  </p>
 
-                      <p className="text-xs text-stone-300 px-4 mt-3 leading-relaxed italic text-center">
-                        "{selectedLoungeProfile.bio || 'Exploring the live chat lounge.'}"
-                      </p>
-                    </div>
-
-                    {/* Stats rows */}
-                    <div className="grid grid-cols-2 gap-2 py-3 border-y border-stone-850 my-4 text-center">
-                      <div className="border-r border-stone-850">
-                        <strong className="text-stone-100 text-sm font-extrabold block">
-                          {selectedLoungeProfile.followers?.length || 0}
-                        </strong>
-                        <span className="text-[9px] uppercase tracking-wider font-extrabold text-stone-400">Followers</span>
-                      </div>
-                      <div>
-                        <strong className="text-stone-100 text-sm font-extrabold block">
-                          {selectedLoungeProfile.following?.length || 0}
-                        </strong>
-                        <span className="text-[9px] uppercase tracking-wider font-extrabold text-stone-400">Following</span>
-                      </div>
-                    </div>
-
-                    <div className="bg-stone-950/50 rounded-2xl p-3 flex items-center justify-between mb-4 border border-stone-850">
-                      <div className="flex items-center gap-2">
-                        <div className="p-2 rounded-xl bg-gradient-to-tr from-amber-500 to-rose-500 text-stone-950 shadow">
-                          <Hand className="w-4 h-4" />
-                        </div>
-                        <div className="text-left">
-                          <span className="text-[8px] text-stone-500 font-extrabold block uppercase tracking-wider">High-Fives Exchanged</span>
-                          <span className="text-[10px] font-bold text-stone-300">
-                            You sent {highFivesSent[selectedLoungeProfile.id] || 0} high-fives
-                          </span>
-                        </div>
-                      </div>
-                      <button
-                        onClick={async () => {
-                          playSynthSound('coin');
-                          setHighFivesSent(prev => ({
-                            ...prev,
-                            [selectedLoungeProfile.id]: (prev[selectedLoungeProfile.id] || 0) + 1
-                          }));
-
-                          // Broadcast/insert high five message
-                          if (activeRoom && isSupabaseConfigured && supabase) {
-                            await supabase
-                              .from('lounge_messages')
-                              .insert({
-                                room_id: activeRoom.id,
-                                sender_id: currentUser.id,
-                                text: `✋ sent @${selectedLoungeProfile.username} a warm high-five!`
-                              });
-                          }
-                        }}
-                        className="px-2.5 py-1.5 bg-amber-500 text-stone-950 font-black rounded-lg text-[9px] transition-all cursor-pointer active:scale-95"
-                      >
-                        Wave ✋
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 mt-4">
-                      <button
-                        onClick={() => setSelectedLoungeProfile(null)}
-                        className="py-2 rounded-xl bg-stone-950 border border-stone-850 text-stone-400 hover:text-stone-200 font-bold text-xs text-center transition-all cursor-pointer"
-                      >
-                        Keep Browsing
-                      </button>
+                  <div className="flex flex-col gap-3">
+                    <button
+                      onClick={async () => {
+                        setShowLeaveOptions(false);
+                        await destroyLoungeRoomForever();
+                      }}
+                      className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold rounded-xl text-xs transition-all active:scale-95 cursor-pointer text-center"
+                    >
+                      Destroy Lounge Room 💥
+                    </button>
+                    
+                    {roomParticipants.filter(p => p.userId !== currentUser?.id).length > 0 && (
                       <button
                         onClick={() => {
-                          const profileId = selectedLoungeProfile.id;
-                          setSelectedLoungeProfile(null);
-                          onClose();
-                          if (onViewProfile) {
-                            onViewProfile(profileId);
-                          }
+                          setShowLeaveOptions(false);
+                          setShowTransferStarSelection(true);
                         }}
-                        className="py-2 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 text-stone-950 font-black text-xs flex items-center justify-center gap-1 transition-all cursor-pointer shadow-md"
+                        className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 text-stone-950 font-black rounded-xl text-xs transition-all active:scale-95 cursor-pointer text-center"
                       >
-                        <span>Full Profile</span>
-                        <ExternalLink className="w-3 h-3" />
+                        Transfer Star & Leave 👑
                       </button>
-                    </div>
-                  </motion.div>
-                </div>
-              )}
-            </AnimatePresence>
+                    )}
+
+                    <button
+                      onClick={() => setShowLeaveOptions(false)}
+                      className="w-full py-2 bg-stone-950 border border-stone-850 text-stone-400 hover:text-stone-200 font-bold text-xs transition-all cursor-pointer text-center rounded-xl"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          {/* ── Transfer Host Star Selection Overlay ── */}
+          <AnimatePresence>
+            {showTransferStarSelection && (
+              <div className="absolute inset-0 bg-stone-950/90 backdrop-blur-md z-50 flex items-center justify-center p-6 text-center">
+                <motion.div
+                  initial={{ scale: 0.95, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  exit={{ scale: 0.95, opacity: 0 }}
+                  className="bg-stone-900 border border-stone-850 rounded-3xl p-6 max-w-sm w-full text-left relative flex flex-col max-h-[80vh]"
+                >
+                  <h3 className="font-extrabold text-sm text-stone-100 mb-2">Select New Host 👑</h3>
+                  <p className="text-xs text-stone-400 mb-4">Choose a participant to receive the Host Star before you leave.</p>
+
+                  <div className="flex-1 overflow-y-auto flex flex-col gap-2.5 pr-1 my-2">
+                    {roomParticipants
+                      .filter(p => p.userId !== currentUser?.id)
+                      .map(part => (
+                        <button
+                          key={part.userId}
+                          onClick={async () => {
+                            setShowTransferStarSelection(false);
+                            await handleTransferAndLeave(part.userId);
+                          }}
+                          className="p-3 bg-stone-950 border border-stone-850 hover:border-amber-500/40 rounded-2xl flex items-center gap-3 text-left transition-all cursor-pointer hover:scale-[1.02] w-full"
+                        >
+                          {part.avatar ? (
+                            <img src={part.avatar} alt="Avatar" className="w-8 h-8 rounded-full object-cover border border-stone-800" />
+                          ) : (
+                            <div className="w-8 h-8 rounded-full bg-stone-850 flex items-center justify-center text-xs border border-stone-800 text-stone-300">👤</div>
+                          )}
+                          <div>
+                            <span className="text-[10px] font-black text-stone-200 block truncate w-40">@{part.username}</span>
+                            <span className="text-[8px] text-stone-500 font-bold block">{part.name}</span>
+                          </div>
+                        </button>
+                      ))}
+                  </div>
+
+                  <button
+                    onClick={() => setShowTransferStarSelection(false)}
+                    className="w-full mt-4 py-2 bg-stone-950 border border-stone-850 text-stone-400 hover:text-stone-200 font-bold text-xs transition-all cursor-pointer text-center rounded-xl"
+                  >
+                    Back
+                  </button>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
 
         </div>
 

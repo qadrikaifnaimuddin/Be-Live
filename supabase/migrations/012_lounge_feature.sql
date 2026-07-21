@@ -21,22 +21,26 @@ CREATE TABLE IF NOT EXISTS public.lounge_rooms (
 ALTER TABLE public.lounge_rooms ENABLE ROW LEVEL SECURITY;
 
 -- Policies for lounge_rooms
+DROP POLICY IF EXISTS "Allow select active lounge rooms" ON public.lounge_rooms;
 CREATE POLICY "Allow select active lounge rooms"
     ON public.lounge_rooms FOR SELECT
     TO authenticated
     USING (active = true);
 
+DROP POLICY IF EXISTS "Allow insert lounge rooms for self" ON public.lounge_rooms;
 CREATE POLICY "Allow insert lounge rooms for self"
     ON public.lounge_rooms FOR INSERT
     TO authenticated
     WITH CHECK (auth.uid() = host_id);
 
+DROP POLICY IF EXISTS "Allow update lounge rooms for host" ON public.lounge_rooms;
 CREATE POLICY "Allow update lounge rooms for host"
     ON public.lounge_rooms FOR UPDATE
     TO authenticated
     USING (auth.uid() = host_id)
-    WITH CHECK (auth.uid() = host_id);
+    WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Allow delete lounge rooms for host" ON public.lounge_rooms;
 CREATE POLICY "Allow delete lounge rooms for host"
     ON public.lounge_rooms FOR DELETE
     TO authenticated
@@ -50,25 +54,32 @@ CREATE TABLE IF NOT EXISTS public.lounge_participants (
     is_mic_on BOOLEAN DEFAULT FALSE,
     is_camera_on BOOLEAN DEFAULT FALSE,
     is_muted_by_admin BOOLEAN DEFAULT FALSE,
+    is_camera_disabled_by_admin BOOLEAN DEFAULT FALSE,
     is_anonymous BOOLEAN DEFAULT FALSE,
     joined_at TIMESTAMPTZ DEFAULT NOW(),
     PRIMARY KEY (room_id, user_id)
 );
 
+-- Ensure new columns are added if tables already existed from an older version
+ALTER TABLE public.lounge_participants ADD COLUMN IF NOT EXISTS is_camera_disabled_by_admin BOOLEAN DEFAULT FALSE;
+
 -- Enable RLS on lounge_participants
 ALTER TABLE public.lounge_participants ENABLE ROW LEVEL SECURITY;
 
 -- Policies for lounge_participants
+DROP POLICY IF EXISTS "Allow select participants" ON public.lounge_participants;
 CREATE POLICY "Allow select participants"
     ON public.lounge_participants FOR SELECT
     TO authenticated
     USING (true);
 
+DROP POLICY IF EXISTS "Allow insert participant self" ON public.lounge_participants;
 CREATE POLICY "Allow insert participant self"
     ON public.lounge_participants FOR INSERT
     TO authenticated
     WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS "Allow update participant self or host" ON public.lounge_participants;
 CREATE POLICY "Allow update participant self or host"
     ON public.lounge_participants FOR UPDATE
     TO authenticated
@@ -78,6 +89,7 @@ CREATE POLICY "Allow update participant self or host"
     )
     WITH CHECK (true);
 
+DROP POLICY IF EXISTS "Allow delete participant self or host" ON public.lounge_participants;
 CREATE POLICY "Allow delete participant self or host"
     ON public.lounge_participants FOR DELETE
     TO authenticated
@@ -103,6 +115,7 @@ CREATE TABLE IF NOT EXISTS public.lounge_messages (
 ALTER TABLE public.lounge_messages ENABLE ROW LEVEL SECURITY;
 
 -- Policies for lounge_messages
+DROP POLICY IF EXISTS "Allow select room messages" ON public.lounge_messages;
 CREATE POLICY "Allow select room messages"
     ON public.lounge_messages FOR SELECT
     TO authenticated
@@ -111,6 +124,7 @@ CREATE POLICY "Allow select room messages"
         WHERE room_id = lounge_messages.room_id AND user_id = auth.uid()
     ));
 
+DROP POLICY IF EXISTS "Allow insert room messages" ON public.lounge_messages;
 CREATE POLICY "Allow insert room messages"
     ON public.lounge_messages FOR INSERT
     TO authenticated
@@ -122,6 +136,7 @@ CREATE POLICY "Allow insert room messages"
         )
     );
 
+DROP POLICY IF EXISTS "Allow delete room messages by sender or host" ON public.lounge_messages;
 CREATE POLICY "Allow delete room messages by sender or host"
     ON public.lounge_messages FOR DELETE
     TO authenticated
@@ -142,11 +157,13 @@ CREATE TABLE IF NOT EXISTS public.lounge_doodles (
 ALTER TABLE public.lounge_doodles ENABLE ROW LEVEL SECURITY;
 
 -- Policies for lounge_doodles
+DROP POLICY IF EXISTS "Allow select room doodles" ON public.lounge_doodles;
 CREATE POLICY "Allow select room doodles"
     ON public.lounge_doodles FOR SELECT
     TO authenticated
     USING (true);
 
+DROP POLICY IF EXISTS "Allow insert/update/upsert room doodles" ON public.lounge_doodles;
 CREATE POLICY "Allow insert/update/upsert room doodles"
     ON public.lounge_doodles FOR ALL
     TO authenticated
@@ -166,11 +183,13 @@ CREATE TABLE IF NOT EXISTS public.lounge_sandbox (
 ALTER TABLE public.lounge_sandbox ENABLE ROW LEVEL SECURITY;
 
 -- Policies for lounge_sandbox
+DROP POLICY IF EXISTS "Allow select room sandbox" ON public.lounge_sandbox;
 CREATE POLICY "Allow select room sandbox"
     ON public.lounge_sandbox FOR SELECT
     TO authenticated
     USING (true);
 
+DROP POLICY IF EXISTS "Allow insert/update/upsert room sandbox" ON public.lounge_sandbox;
 CREATE POLICY "Allow insert/update/upsert room sandbox"
     ON public.lounge_sandbox FOR ALL
     TO authenticated
@@ -193,6 +212,7 @@ CREATE TABLE IF NOT EXISTS public.lounge_snaps (
 ALTER TABLE public.lounge_snaps ENABLE ROW LEVEL SECURITY;
 
 -- Policies for lounge_snaps
+DROP POLICY IF EXISTS "Allow select room snaps" ON public.lounge_snaps;
 CREATE POLICY "Allow select room snaps"
     ON public.lounge_snaps FOR SELECT
     TO authenticated
@@ -201,11 +221,13 @@ CREATE POLICY "Allow select room snaps"
         WHERE room_id = lounge_snaps.room_id AND user_id = auth.uid()
     ));
 
+DROP POLICY IF EXISTS "Allow insert room snaps" ON public.lounge_snaps;
 CREATE POLICY "Allow insert room snaps"
     ON public.lounge_snaps FOR INSERT
     TO authenticated
     WITH CHECK (auth.uid() = creator_id);
 
+DROP POLICY IF EXISTS "Allow delete room snaps by creator or host" ON public.lounge_snaps;
 CREATE POLICY "Allow delete room snaps by creator or host"
     ON public.lounge_snaps FOR DELETE
     TO authenticated
@@ -231,11 +253,13 @@ CREATE TABLE IF NOT EXISTS public.lounge_polls (
 ALTER TABLE public.lounge_polls ENABLE ROW LEVEL SECURITY;
 
 -- Policies for lounge_polls
+DROP POLICY IF EXISTS "Allow select room polls" ON public.lounge_polls;
 CREATE POLICY "Allow select room polls"
     ON public.lounge_polls FOR SELECT
     TO authenticated
     USING (true);
 
+DROP POLICY IF EXISTS "Allow insert/update/upsert room polls" ON public.lounge_polls;
 CREATE POLICY "Allow insert/update/upsert room polls"
     ON public.lounge_polls FOR ALL
     TO authenticated

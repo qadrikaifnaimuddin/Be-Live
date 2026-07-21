@@ -235,6 +235,10 @@ export default function App() {
           } catch (err) {
             console.error('[Supabase Auth Change Error]:', err);
           }
+        } else {
+          // If no active session in Supabase, clear local user state to prevent stale/unauthenticated requests
+          setCurrentUser(null);
+          localStorage.removeItem('be_live_current_user');
         }
       });
 
