@@ -63,6 +63,13 @@ export default function StrangerChatModal({
   
   // Matchmaking State
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const activeSessionIdRef = useRef<string | null>(null);
+
+  const updateSessionId = (id: string | null) => {
+    setActiveSessionId(id);
+    activeSessionIdRef.current = id;
+  };
+
   const [partner, setPartner] = useState<User | null>(null);
   const [messages, setMessages] = useState<StrangerMessage[]>([]);
   const [inputText, setInputText] = useState('');
@@ -120,15 +127,15 @@ export default function StrangerChatModal({
     }
 
     // 3. Remove session row from DB
-    if (shouldCleanDB && activeSessionId && isSupabaseConfigured && supabase) {
-      const sessId = activeSessionId;
-      setActiveSessionId(null);
+    const currentSessionId = activeSessionIdRef.current;
+    if (shouldCleanDB && currentSessionId && isSupabaseConfigured && supabase) {
+      updateSessionId(null);
       await supabase
         .from('stranger_sessions')
         .delete()
-        .eq('id', sessId);
+        .eq('id', currentSessionId);
     }
-    setActiveSessionId(null);
+    updateSessionId(null);
   };
 
   // Keyboard shortcut Esc to skip matching
@@ -152,11 +159,11 @@ export default function StrangerChatModal({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, matchState, confirmStop, activeSessionId]);
+  }, [isOpen, matchState, confirmStop]);
 
   // Request local camera stream
   useEffect(() => {
-    if (isOpen && chatMode === 'video' && matchState !== 'idle' && cameraOn) {
+    if (isOpen && chatMode === 'video' && cameraOn) {
       navigator.mediaDevices.getUserMedia({
         video: { facingMode: cameraFacing },
         audio: true
@@ -204,7 +211,7 @@ export default function StrangerChatModal({
         localStream.getTracks().forEach(t => t.stop());
       }
     };
-  }, [isOpen, chatMode, matchState, cameraOn, cameraFacing]);
+  }, [isOpen, chatMode, cameraOn, cameraFacing]);
 
   // Handle speaker toggle
   useEffect(() => {
@@ -222,21 +229,22 @@ export default function StrangerChatModal({
       }
       if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
     };
-  }, [activeSessionId]);
+  }, []);
 
   // Before unload hook to automatically remove user from queue and session
   useEffect(() => {
     const handleUnload = () => {
       if (currentUser && isSupabaseConfigured && supabase) {
         supabase.from('stranger_queue').delete().eq('user_id', currentUser.id).then();
-        if (activeSessionId) {
-          supabase.from('stranger_sessions').delete().eq('id', activeSessionId).then();
+        const currentSessionId = activeSessionIdRef.current;
+        if (currentSessionId) {
+          supabase.from('stranger_sessions').delete().eq('id', currentSessionId).then();
         }
       }
     };
     window.addEventListener('beforeunload', handleUnload);
     return () => window.removeEventListener('beforeunload', handleUnload);
-  }, [currentUser, activeSessionId]);
+  }, [currentUser]);
 
   // Scroll to bottom
   useEffect(() => {
@@ -432,7 +440,7 @@ export default function StrangerChatModal({
         // MATCH FOUND IN QUEUE! (We are the initiator)
         const sessId = data.session_id;
         const oppId = data.opponent_id;
-        setActiveSessionId(sessId);
+        updateSessionId(sessId);
         setMatchedCommonInterests(data.shared_interests || []);
 
         // Fetch opponent user profile
@@ -486,7 +494,7 @@ export default function StrangerChatModal({
               // Check if we are part of this new session
               if (session.user_1_id === currentUser.id || session.user_2_id === currentUser.id) {
                 const oppId = session.user_1_id === currentUser.id ? session.user_2_id : session.user_1_id;
-                setActiveSessionId(session.id);
+                updateSessionId(session.id);
                 queueCh.unsubscribe();
                 queueChannelRef.current = null;
 

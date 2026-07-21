@@ -139,3 +139,11 @@ BEGIN
     END IF;
 END;
 $$;
+
+-- Enable Realtime replication for stranger_sessions and stranger_queue
+BEGIN;
+  ALTER PUBLICATION supabase_realtime DROP TABLE IF EXISTS public.stranger_sessions;
+  ALTER PUBLICATION supabase_realtime DROP TABLE IF EXISTS public.stranger_queue;
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.stranger_sessions;
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.stranger_queue;
+COMMIT;
