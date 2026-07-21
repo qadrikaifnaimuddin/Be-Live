@@ -140,10 +140,32 @@ BEGIN
 END;
 $$;
 
--- Enable Realtime replication for stranger_sessions and stranger_queue
-BEGIN;
-  ALTER PUBLICATION supabase_realtime DROP TABLE IF EXISTS public.stranger_sessions;
-  ALTER PUBLICATION supabase_realtime DROP TABLE IF EXISTS public.stranger_queue;
-  ALTER PUBLICATION supabase_realtime ADD TABLE public.stranger_sessions;
-  ALTER PUBLICATION supabase_realtime ADD TABLE public.stranger_queue;
-COMMIT;
+-- Enable Realtime replication for stranger_sessions and stranger_queue if they are not already members
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 
+        FROM pg_publication_rel pr
+        JOIN pg_publication p ON p.oid = pr.prpubid
+        JOIN pg_class c ON c.oid = pr.prrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE p.pubname = 'supabase_realtime' 
+          AND n.nspname = 'public' 
+          AND c.relname = 'stranger_sessions'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.stranger_sessions;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 
+        FROM pg_publication_rel pr
+        JOIN pg_publication p ON p.oid = pr.prpubid
+        JOIN pg_class c ON c.oid = pr.prrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE p.pubname = 'supabase_realtime' 
+          AND n.nspname = 'public' 
+          AND c.relname = 'stranger_queue'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.stranger_queue;
+    END IF;
+END $$;
