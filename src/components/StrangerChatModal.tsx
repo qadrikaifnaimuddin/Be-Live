@@ -231,6 +231,20 @@ export default function StrangerChatModal({
     };
   }, [isOpen, chatMode, cameraOn, cameraFacing]);
 
+  // Synchronize local stream to localVideoRef
+  useEffect(() => {
+    if (localStream && localVideoRef.current) {
+      localVideoRef.current.srcObject = localStream;
+    }
+  }, [localStream, cameraOn]);
+
+  // Synchronize remote stream to remoteVideoRef
+  useEffect(() => {
+    if (remoteStream && remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = remoteStream;
+    }
+  }, [remoteStream]);
+
   // Handle speaker toggle
   useEffect(() => {
     if (remoteVideoRef.current) {
@@ -336,16 +350,28 @@ export default function StrangerChatModal({
       }
     }, 12000);
 
+    const handleConnected = () => {
+      if (connectionTimeoutRef.current) {
+        clearTimeout(connectionTimeoutRef.current);
+        connectionTimeoutRef.current = null;
+      }
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current);
+        pingIntervalRef.current = null;
+      }
+    };
+
     pc.onconnectionstatechange = () => {
+      console.log("[StrangerChat] connectionState:", pc.connectionState);
       if (pc.connectionState === 'connected') {
-        if (connectionTimeoutRef.current) {
-          clearTimeout(connectionTimeoutRef.current);
-          connectionTimeoutRef.current = null;
-        }
-        if (pingIntervalRef.current) {
-          clearInterval(pingIntervalRef.current);
-          pingIntervalRef.current = null;
-        }
+        handleConnected();
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log("[StrangerChat] iceConnectionState:", pc.iceConnectionState);
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        handleConnected();
       }
     };
 
@@ -1027,14 +1053,13 @@ export default function StrangerChatModal({
                     
                     {/* Stranger remote stream */}
                     <div className="flex-1 min-h-[120px] md:min-h-[160px] h-full bg-stone-900 border border-stone-850 rounded-2xl overflow-hidden relative flex flex-col justify-center items-center group">
-                      {remoteStream ? (
-                        <video
-                          ref={remoteVideoRef}
-                          autoPlay
-                          playsInline
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
+                      <video
+                        ref={remoteVideoRef}
+                        autoPlay
+                        playsInline
+                        className={`w-full h-full object-cover ${remoteStream ? 'block' : 'hidden'}`}
+                      />
+                      {!remoteStream && (
                         <div className="space-y-3 text-center">
                           <div className="w-16 h-16 rounded-full bg-stone-950 flex items-center justify-center border border-stone-850 mx-auto text-neutral-500">
                             <Shuffle className="w-8 h-8 animate-spin text-pink-500" />
@@ -1053,15 +1078,14 @@ export default function StrangerChatModal({
 
                     {/* Local Stream Screen */}
                     <div className="flex-1 min-h-[120px] md:min-h-[160px] h-full bg-stone-900 border border-stone-850 rounded-2xl overflow-hidden relative flex flex-col justify-center items-center group">
-                      {cameraOn ? (
-                        <video
-                          ref={localVideoRef}
-                          autoPlay
-                          playsInline
-                          muted
-                          className="w-full h-full object-cover scale-x-[-1]"
-                        />
-                      ) : (
+                      <video
+                        ref={localVideoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className={`w-full h-full object-cover scale-x-[-1] ${cameraOn ? 'block' : 'hidden'}`}
+                      />
+                      {!cameraOn && (
                         <div className="space-y-2 text-center p-4">
                           {currentUser?.isAnonymousMode ? (
                             <div className="w-14 h-14 rounded-full bg-gradient-to-tr from-purple-600 to-indigo-600 border-2 border-purple-500 mx-auto flex items-center justify-center text-2xl shadow-md">
