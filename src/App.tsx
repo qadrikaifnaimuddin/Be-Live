@@ -11,10 +11,11 @@ import { useFollowSystem } from './lib/useFollowSystem';
 import { useWebRTC, RemoteUser } from './lib/useWebRTC';
 import { User, Post, Story, Highlight } from './types';
 import { supabase, isSupabaseConfigured } from './lib/supabaseClient';
-import { MessageCircle, User as UserIcon, Bell, Search, Coffee } from 'lucide-react';
+import { MessageCircle, User as UserIcon, Bell, Search, Coffee, Shuffle } from 'lucide-react';
 import SocialLoungeModal from './components/SocialLoungeModal';
+import StrangerChatModal from './components/StrangerChatModal';
 
-type AppTab = 'profile' | 'search' | 'messages' | 'notifications' | 'lounge';
+type AppTab = 'profile' | 'search' | 'messages' | 'notifications' | 'lounge' | 'stranger_chat';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -759,6 +760,16 @@ export default function App() {
                 </button>
 
                 <button
+                  onClick={() => setActiveTab('stranger_chat')}
+                  className={`flex flex-col items-center gap-1 px-4 py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'stranger_chat' ? 'text-pink-400' : 'text-stone-600 hover:text-stone-400'}`}
+                >
+                  <div className={`p-2 rounded-xl transition-all ${activeTab === 'stranger_chat' ? 'bg-pink-500/20' : ''}`}>
+                    <Shuffle className="w-5 h-5" />
+                  </div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider">Stranger</span>
+                </button>
+
+                <button
                   onClick={() => setActiveTab('lounge')}
                   className={`flex flex-col items-center gap-1 px-4 py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'lounge' ? 'text-amber-400' : 'text-stone-600 hover:text-stone-400'}`}
                 >
@@ -795,6 +806,14 @@ export default function App() {
         onClose={() => setActiveTab('profile')}
         currentUser={currentUser}
         users={[]}
+        onViewProfile={handleViewProfile}
+      />
+
+      {/* ── Stranger Chat Overlay Modal ── */}
+      <StrangerChatModal
+        isOpen={activeTab === 'stranger_chat'}
+        onClose={() => setActiveTab('profile')}
+        currentUser={currentUser}
         onViewProfile={handleViewProfile}
       />
 

@@ -13,7 +13,6 @@ import { User, LoungeRoom, LoungeRoomParticipant, JoinRequest } from '../types';
 import { VOICE_PROFILES, speakProceduralVocal } from '../lib/voiceChanger';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 import LoungeInteractive3D from './LoungeInteractive3D';
-import StrangerChatModal from './StrangerChatModal';
 
 interface SocialLoungeModalProps {
   isOpen: boolean;
@@ -130,7 +129,6 @@ export default function SocialLoungeModal({
   // View States
   const [viewState, setViewState] = useState<'dashboard' | 'create' | 'room'>('dashboard');
   const [activeTab, setActiveTab] = useState<'stage' | 'sandbox' | 'ambient' | 'games' | 'snap'>('stage');
-  const [openStrangerChat, setOpenStrangerChat] = useState(false);
   
   // Realtime Database states
   const [rooms, setRooms] = useState<LoungeRoom[]>([]);
@@ -1564,22 +1562,6 @@ export default function SocialLoungeModal({
                 </button>
               </div>
 
-              {/* Stranger Chat Roulette card */}
-              <div className="relative overflow-hidden rounded-3xl p-5 bg-gradient-to-r from-pink-500 via-purple-600 to-indigo-600 border border-pink-500/20 text-white flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-lg shadow-pink-500/10">
-                <div className="space-y-1 text-left">
-                  <h3 className="font-extrabold text-sm flex items-center gap-1.5">
-                    <Globe className="w-4 h-4 text-pink-300 animate-pulse" /> Stranger Chat Roulette
-                  </h3>
-                  <p className="text-[10px] text-pink-100 max-w-sm">Connect instantly and chat 1-on-1 with random online users anonymously.</p>
-                </div>
-                <button
-                  onClick={() => { playSynthSound('coin'); setOpenStrangerChat(true); }}
-                  className="px-5 py-2.5 bg-stone-950/80 hover:bg-stone-950 text-pink-400 hover:text-pink-300 font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer select-none active:scale-95 whitespace-nowrap"
-                >
-                  Start Match 🤝
-                </button>
-              </div>
-
               {dbError && (
                 <div className="p-4 bg-rose-950/20 border border-rose-900/40 rounded-2xl flex items-start gap-3 text-left">
                   <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
@@ -2795,16 +2777,6 @@ export default function SocialLoungeModal({
               </div>
             )}
           </AnimatePresence>
-
-          {/* ── Stranger Chat Modal Overlay ── */}
-          <StrangerChatModal
-            isOpen={openStrangerChat}
-            onClose={() => setOpenStrangerChat(false)}
-            currentUser={currentUser}
-            users={users}
-            onUpdateProfile={onUpdateProfile}
-            onViewProfile={onViewProfile}
-          />
 
         </div>
 
