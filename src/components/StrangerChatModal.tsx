@@ -349,6 +349,23 @@ export default function StrangerChatModal({
       }
     };
 
+    const remoteCandidatesQueue: RTCIceCandidateInit[] = [];
+    let isRemoteDescriptionSet = false;
+
+    const processQueue = async () => {
+      isRemoteDescriptionSet = true;
+      while (remoteCandidatesQueue.length > 0) {
+        const cand = remoteCandidatesQueue.shift();
+        if (cand) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(cand));
+          } catch (e) {
+            console.warn("Error adding queued ICE candidate:", e);
+          }
+        }
+      }
+    };
+
     // Attach local stream tracks
     if (localStream) {
       localStream.getTracks().forEach(track => {
@@ -358,11 +375,23 @@ export default function StrangerChatModal({
 
     // Capture remote stream track
     pc.ontrack = (event) => {
-      if (event.streams && event.streams[0]) {
-        setRemoteStream(event.streams[0]);
+      console.log("[StrangerChat] ontrack event received:", event);
+      const [remoteStream] = event.streams;
+      if (remoteStream) {
+        setRemoteStream(remoteStream);
         if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = event.streams[0];
+          remoteVideoRef.current.srcObject = remoteStream;
         }
+      } else {
+        // Create new MediaStream from track if streams list is empty
+        setRemoteStream(prev => {
+          const current = prev || new MediaStream();
+          current.addTrack(event.track);
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = current;
+          }
+          return current;
+        });
       }
     };
 
@@ -408,6 +437,7 @@ export default function StrangerChatModal({
             pingIntervalRef.current = null;
           }
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+          await processQueue();
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
 
@@ -425,14 +455,21 @@ export default function StrangerChatModal({
             pingIntervalRef.current = null;
           }
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+          await processQueue();
         }
       })
       .on('broadcast', { event: 'ice-candidate' }, async ({ payload }) => {
         if (payload.from !== currentUser?.id && payload.candidate) {
-          try {
-            await pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
-          } catch (e) {
-            console.warn("Error adding ICE candidate:", e);
+          const candidate = new RTCIceCandidate(payload.candidate);
+          if (isRemoteDescriptionSet) {
+            try {
+              await pc.addIceCandidate(candidate);
+            } catch (e) {
+              console.warn("Error adding ICE candidate:", e);
+            }
+          } else {
+            console.log("[StrangerChat] Remote description not set yet. Queuing ICE candidate.");
+            remoteCandidatesQueue.push(payload.candidate);
           }
         }
       })
