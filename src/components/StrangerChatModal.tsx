@@ -92,6 +92,7 @@ export default function StrangerChatModal({
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
   const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const disconnectMonitorChRef = useRef<any>(null);
 
   // Clean up WebRTC session & channel connections
   const cleanUpSession = async (shouldCleanDB = true) => {
@@ -110,6 +111,12 @@ export default function StrangerChatModal({
     if (signalChannelRef.current) {
       signalChannelRef.current.unsubscribe();
       signalChannelRef.current = null;
+    }
+
+    // Unsubscribe disconnect monitor channel
+    if (disconnectMonitorChRef.current) {
+      disconnectMonitorChRef.current.unsubscribe();
+      disconnectMonitorChRef.current = null;
     }
 
     // 3. Remove session row from DB
@@ -462,6 +469,9 @@ export default function StrangerChatModal({
         // Start WebRTC connection setup
         initializeWebRTC(sessId, true);
 
+        // Start listening to the session row deletion (indicating partner left/skipped)
+        listenSessionDeletion(sessId);
+
       } else {
         // NO IMMEDIATE MATCH WAITING: Put in queue and listen to stranger_sessions insertion
         if (queueChannelRef.current) queueChannelRef.current.unsubscribe();
@@ -513,6 +523,9 @@ export default function StrangerChatModal({
 
                 // Start WebRTC connection (We are the receiver/listener)
                 initializeWebRTC(session.id, false);
+
+                // Start listening to the session row deletion (indicating partner left/skipped)
+                listenSessionDeletion(session.id);
               }
             }
           )
@@ -520,9 +533,6 @@ export default function StrangerChatModal({
 
         queueChannelRef.current = queueCh;
       }
-
-      // Start listening to the session row deletion (indicating partner left/skipped)
-      listenSessionDeletion();
 
     } catch (err: any) {
       console.error("[Stranger Chat Error]:", err);
@@ -532,22 +542,28 @@ export default function StrangerChatModal({
   };
 
   // Subscribes to table deletes to detect if partner left/skipped
-  const listenSessionDeletion = () => {
+  const listenSessionDeletion = (sessionId: string) => {
     if (!isSupabaseConfigured || !supabase) return;
+
+    if (disconnectMonitorChRef.current) {
+      disconnectMonitorChRef.current.unsubscribe();
+      disconnectMonitorChRef.current = null;
+    }
     
     const sessDelCh = supabase
-      .channel('stranger-session-disconnect-monitor')
+      .channel(`stranger-session-disconnect-monitor-${sessionId}`)
       .on(
         'postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'stranger_sessions' },
+        { event: 'DELETE', schema: 'public', table: 'stranger_sessions', filter: `id=eq.${sessionId}` },
         (payload) => {
-          if (activeSessionId && payload.old && payload.old.id === activeSessionId) {
-            handlePartnerDisconnect();
-            sessDelCh.unsubscribe();
-          }
+          handlePartnerDisconnect();
+          sessDelCh.unsubscribe();
+          disconnectMonitorChRef.current = null;
         }
       )
       .subscribe();
+
+    disconnectMonitorChRef.current = sessDelCh;
   };
 
   const handlePartnerDisconnect = () => {
