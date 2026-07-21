@@ -116,13 +116,13 @@ export default function StrangerChatModal({
 
     // 2. Unsubscribe signaling channel
     if (signalChannelRef.current) {
-      signalChannelRef.current.unsubscribe();
+      if (isSupabaseConfigured && supabase) supabase.removeChannel(signalChannelRef.current);
       signalChannelRef.current = null;
     }
 
     // Unsubscribe disconnect monitor channel
     if (disconnectMonitorChRef.current) {
-      disconnectMonitorChRef.current.unsubscribe();
+      if (isSupabaseConfigured && supabase) supabase.removeChannel(disconnectMonitorChRef.current);
       disconnectMonitorChRef.current = null;
     }
 
@@ -173,17 +173,29 @@ export default function StrangerChatModal({
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
         }
-        // If we have an active WebRTC peer connection, swap tracks
+        // If we have an active WebRTC peer connection, swap or add tracks
         if (peerConnectionRef.current) {
           const videoTrack = stream.getVideoTracks()[0];
           const audioTrack = stream.getAudioTracks()[0];
           const senders = peerConnectionRef.current.getSenders();
           
-          const vSender = senders.find(s => s.track?.kind === 'video');
-          if (vSender && videoTrack) vSender.replaceTrack(videoTrack);
+          if (videoTrack) {
+            const vSender = senders.find(s => s.track?.kind === 'video');
+            if (vSender) {
+              vSender.replaceTrack(videoTrack);
+            } else {
+              peerConnectionRef.current.addTrack(videoTrack, stream);
+            }
+          }
 
-          const aSender = senders.find(s => s.track?.kind === 'audio');
-          if (aSender && audioTrack) aSender.replaceTrack(audioTrack);
+          if (audioTrack) {
+            const aSender = senders.find(s => s.track?.kind === 'audio');
+            if (aSender) {
+              aSender.replaceTrack(audioTrack);
+            } else {
+              peerConnectionRef.current.addTrack(audioTrack, stream);
+            }
+          }
         }
       })
       .catch(err => {
@@ -225,7 +237,8 @@ export default function StrangerChatModal({
     return () => {
       cleanUpSession(true);
       if (queueChannelRef.current) {
-        queueChannelRef.current.unsubscribe();
+        if (isSupabaseConfigured && supabase) supabase.removeChannel(queueChannelRef.current);
+        queueChannelRef.current = null;
       }
       if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
     };
@@ -482,7 +495,10 @@ export default function StrangerChatModal({
 
       } else {
         // NO IMMEDIATE MATCH WAITING: Put in queue and listen to stranger_sessions insertion
-        if (queueChannelRef.current) queueChannelRef.current.unsubscribe();
+        if (queueChannelRef.current) {
+          if (isSupabaseConfigured && supabase) supabase.removeChannel(queueChannelRef.current);
+          queueChannelRef.current = null;
+        }
 
         const queueCh = supabase
           .channel('stranger-session-queue-wait')
@@ -495,7 +511,7 @@ export default function StrangerChatModal({
               if (session.user_1_id === currentUser.id || session.user_2_id === currentUser.id) {
                 const oppId = session.user_1_id === currentUser.id ? session.user_2_id : session.user_1_id;
                 updateSessionId(session.id);
-                queueCh.unsubscribe();
+                if (isSupabaseConfigured && supabase) supabase.removeChannel(queueCh);
                 queueChannelRef.current = null;
 
                 // Fetch partner profile
@@ -554,7 +570,7 @@ export default function StrangerChatModal({
     if (!isSupabaseConfigured || !supabase) return;
 
     if (disconnectMonitorChRef.current) {
-      disconnectMonitorChRef.current.unsubscribe();
+      supabase.removeChannel(disconnectMonitorChRef.current);
       disconnectMonitorChRef.current = null;
     }
     
@@ -562,11 +578,14 @@ export default function StrangerChatModal({
       .channel(`stranger-session-disconnect-monitor-${sessionId}`)
       .on(
         'postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'stranger_sessions', filter: `id=eq.${sessionId}` },
+        { event: 'DELETE', schema: 'public', table: 'stranger_sessions' },
         (payload) => {
-          handlePartnerDisconnect();
-          sessDelCh.unsubscribe();
-          disconnectMonitorChRef.current = null;
+          if (payload.old && payload.old.id === sessionId) {
+            console.log("[StrangerChat] Partner left, deleting session:", sessionId);
+            handlePartnerDisconnect();
+            supabase.removeChannel(sessDelCh);
+            disconnectMonitorChRef.current = null;
+          }
         }
       )
       .subscribe();
@@ -621,7 +640,7 @@ export default function StrangerChatModal({
         await supabase.from('stranger_queue').delete().eq('user_id', currentUser.id);
       }
       if (queueChannelRef.current) {
-        queueChannelRef.current.unsubscribe();
+        if (isSupabaseConfigured && supabase) supabase.removeChannel(queueChannelRef.current);
         queueChannelRef.current = null;
       }
 
@@ -679,7 +698,7 @@ export default function StrangerChatModal({
   const handleClose = () => {
     cleanUpSession(true);
     if (queueChannelRef.current) {
-      queueChannelRef.current.unsubscribe();
+      if (isSupabaseConfigured && supabase) supabase.removeChannel(queueChannelRef.current);
       queueChannelRef.current = null;
     }
     if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
