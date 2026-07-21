@@ -91,6 +91,7 @@ export default function StrangerChatModal({
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Clean up WebRTC session & channel connections
   const cleanUpSession = async (shouldCleanDB = true) => {
@@ -100,6 +101,10 @@ export default function StrangerChatModal({
       peerConnectionRef.current = null;
     }
     setRemoteStream(null);
+    if (connectionTimeoutRef.current) {
+      clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
+    }
 
     // 2. Unsubscribe signaling channel
     if (signalChannelRef.current) {
@@ -169,6 +174,16 @@ export default function StrangerChatModal({
       })
       .catch(err => {
         console.warn("[StrangerChat] Local camera stream failed:", err);
+        setChatMode('text');
+        setMessages(prev => [
+          ...prev,
+          {
+            id: `sys_perm_fail_${Date.now()}`,
+            sender: 'system',
+            text: 'Camera or Mic permission denied. Reverting to Text Mode.',
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          }
+        ]);
       });
     } else {
       if (localStream) {
@@ -201,6 +216,20 @@ export default function StrangerChatModal({
       if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
     };
   }, [activeSessionId]);
+
+  // Before unload hook to automatically remove user from queue and session
+  useEffect(() => {
+    const handleUnload = () => {
+      if (currentUser && isSupabaseConfigured && supabase) {
+        supabase.from('stranger_queue').delete().eq('user_id', currentUser.id).then();
+        if (activeSessionId) {
+          supabase.from('stranger_sessions').delete().eq('id', activeSessionId).then();
+        }
+      }
+    };
+    window.addEventListener('beforeunload', handleUnload);
+    return () => window.removeEventListener('beforeunload', handleUnload);
+  }, [currentUser, activeSessionId]);
 
   // Scroll to bottom
   useEffect(() => {
@@ -254,6 +283,33 @@ export default function StrangerChatModal({
   const initializeWebRTC = (sessionId: string, isInitiator: boolean) => {
     const pc = new RTCPeerConnection(ICE_CONFIG);
     peerConnectionRef.current = pc;
+
+    // 12-second WebRTC connection timeout
+    if (connectionTimeoutRef.current) clearTimeout(connectionTimeoutRef.current);
+    connectionTimeoutRef.current = setTimeout(() => {
+      if (peerConnectionRef.current && (peerConnectionRef.current.connectionState === 'new' || peerConnectionRef.current.connectionState === 'connecting')) {
+        console.warn("[StrangerChat] Connection timed out. Auto skipping.");
+        setMessages(prev => [
+          ...prev,
+          {
+            id: `sys_timeout_${Date.now()}`,
+            sender: 'system',
+            text: 'Connection timed out. Finding another stranger...',
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          }
+        ]);
+        handleStopChat();
+      }
+    }, 12000);
+
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'connected') {
+        if (connectionTimeoutRef.current) {
+          clearTimeout(connectionTimeoutRef.current);
+          connectionTimeoutRef.current = null;
+        }
+      }
+    };
 
     // Attach local stream tracks
     if (localStream) {

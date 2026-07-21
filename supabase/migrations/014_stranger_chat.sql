@@ -91,6 +91,9 @@ BEGIN
     -- Remove stale queues for self to avoid duplicates
     DELETE FROM public.stranger_queue WHERE user_id = p_user_id;
 
+    -- Remove any queue records older than 1 minute to keep the queue clean
+    DELETE FROM public.stranger_queue WHERE created_at < NOW() - INTERVAL '1 minute';
+
     -- Try to match with an active user in the queue
     SELECT q.user_id, q.interests INTO v_opponent_id, v_opponent_interests
     FROM public.stranger_queue q
