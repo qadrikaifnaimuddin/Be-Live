@@ -154,27 +154,66 @@ export default function LiveStreamModal({
   // End Summary Screen State
   const [copiedLink, setCopiedLink] = useState(false);
 
-  // Fetch all active live streams from Supabase
+  // Fetch all active live streams from Supabase with fail-safe profile resolution
   const fetchActiveStreams = async () => {
     if (!isSupabaseConfigured || !supabase) return;
     setLoadingStreams(true);
     try {
+      // 1. Primary Query: Try fetching live_streams with join
       const { data: streams, error } = await supabase
         .from('live_streams')
         .select(`
           *,
-          hostProfile:profiles!live_streams_host_id_fkey(id, username, name, avatar, is_anonymous_mode, anon_username, anon_emoji)
+          profiles (id, username, name, avatar, is_anonymous_mode, anon_username, anon_emoji)
         `)
         .eq('status', 'live')
         .order('created_at', { ascending: false });
 
-      if (error) {
-        console.warn("[LiveStream Discovery Error]:", error);
-      } else if (streams) {
-        setActiveStreams(streams as any[]);
+      if (!error && streams && streams.length > 0) {
+        const hostIds = streams.map(s => s.host_id).filter(Boolean);
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, username, name, avatar, is_anonymous_mode, anon_username, anon_emoji')
+          .in('id', hostIds);
+
+        const profileMap = new Map((profiles || []).map(p => [p.id, p]));
+
+        const formatted = streams.map(s => ({
+          ...s,
+          hostProfile: s.profiles || profileMap.get(s.host_id)
+        }));
+
+        setActiveStreams(formatted as any[]);
+      } else {
+        // 2. Fail-safe Fallback Query: Fetch live_streams directly without join
+        const { data: plainStreams } = await supabase
+          .from('live_streams')
+          .select('*')
+          .eq('status', 'live')
+          .order('created_at', { ascending: false });
+
+        if (plainStreams && plainStreams.length > 0) {
+          const hostIds = plainStreams.map(s => s.host_id).filter(Boolean);
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('id, username, name, avatar, is_anonymous_mode, anon_username, anon_emoji')
+            .in('id', hostIds);
+
+          const profileMap = new Map((profiles || []).map(p => [p.id, p]));
+
+          const formatted = plainStreams.map(s => ({
+            ...s,
+            hostProfile: profileMap.get(s.host_id)
+          }));
+
+          setActiveStreams(formatted as any[]);
+        } else {
+          setActiveStreams([]);
+        }
       }
     } catch (e) {
       console.warn("Failed to load active streams:", e);
+      setActiveStreams([]);
     } finally {
       setLoadingStreams(false);
     }
