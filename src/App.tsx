@@ -11,11 +11,12 @@ import { useFollowSystem } from './lib/useFollowSystem';
 import { useWebRTC, RemoteUser } from './lib/useWebRTC';
 import { User, Post, Story, Highlight } from './types';
 import { supabase, isSupabaseConfigured } from './lib/supabaseClient';
-import { MessageCircle, User as UserIcon, Bell, Search, Coffee, Shuffle } from 'lucide-react';
+import { MessageCircle, User as UserIcon, Bell, Search, Coffee, Shuffle, Radio } from 'lucide-react';
 import SocialLoungeModal from './components/SocialLoungeModal';
 import StrangerChatModal from './components/StrangerChatModal';
+import LiveStreamModal from './components/LiveStreamModal';
 
-type AppTab = 'profile' | 'search' | 'messages' | 'notifications' | 'lounge' | 'stranger_chat';
+type AppTab = 'profile' | 'search' | 'messages' | 'notifications' | 'lounge' | 'stranger_chat' | 'live_stream';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -760,6 +761,16 @@ export default function App() {
                 </button>
 
                 <button
+                  onClick={() => setActiveTab('live_stream')}
+                  className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1.5 sm:px-4 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'live_stream' ? 'text-rose-400' : 'text-stone-600 hover:text-stone-400'}`}
+                >
+                  <div className={`p-1.5 sm:p-2 rounded-xl transition-all ${activeTab === 'live_stream' ? 'bg-rose-500/20' : ''}`}>
+                    <Radio className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
+                  </div>
+                  <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider hidden sm:block">Live</span>
+                </button>
+
+                <button
                   onClick={() => setActiveTab('stranger_chat')}
                   className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1.5 sm:px-4 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'stranger_chat' ? 'text-pink-400' : 'text-stone-600 hover:text-stone-400'}`}
                 >
@@ -816,6 +827,18 @@ export default function App() {
         currentUser={currentUser}
         onViewProfile={handleViewProfile}
       />
+
+      {/* ── Live Stream Overlay Modal ── */}
+      {currentUser && (
+        <LiveStreamModal
+          isOpen={activeTab === 'live_stream'}
+          onClose={() => setActiveTab('profile')}
+          currentUser={currentUser}
+          mode="broadcast"
+          onViewProfile={handleViewProfile}
+          onToggleFollow={(userId, isPrivate) => followSystem.follow(userId, !!isPrivate)}
+        />
+      )}
 
       {/* ── Global Call Overlay — renders over every screen ── */}
       <CallOverlay
