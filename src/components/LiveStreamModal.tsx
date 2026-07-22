@@ -441,8 +441,27 @@ export default function LiveStreamModal({
     signalChannelRef.current = signalCh;
 
     signalCh
+      .on('broadcast', { event: 'request-offer' }, async ({ payload }) => {
+        if (payload.from !== currentUser.id && currentRole === 'broadcast') {
+          console.log("[LiveStream] Received request-offer from new viewer:", payload.from);
+          if (peerConnectionRef.current) {
+            try {
+              const offer = await peerConnectionRef.current.createOffer();
+              await peerConnectionRef.current.setLocalDescription(offer);
+              signalCh.send({
+                type: 'broadcast',
+                event: 'offer',
+                payload: { sdp: offer, from: currentUser.id }
+              });
+            } catch (err) {
+              console.warn("[LiveStream] Error creating offer for viewer:", err);
+            }
+          }
+        }
+      })
       .on('broadcast', { event: 'offer' }, async ({ payload }) => {
         if (payload.from !== currentUser.id && currentRole === 'view') {
+          console.log("[LiveStream] Received SDP offer from host");
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
@@ -456,6 +475,7 @@ export default function LiveStreamModal({
       })
       .on('broadcast', { event: 'answer' }, async ({ payload }) => {
         if (payload.from !== currentUser.id && currentRole === 'broadcast') {
+          console.log("[LiveStream] Received SDP answer from viewer");
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
         }
       })
@@ -493,14 +513,23 @@ export default function LiveStreamModal({
         }
       })
       .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED' && currentRole === 'broadcast') {
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          signalCh.send({
-            type: 'broadcast',
-            event: 'offer',
-            payload: { sdp: offer, from: currentUser.id }
-          });
+        if (status === 'SUBSCRIBED') {
+          if (currentRole === 'broadcast') {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            signalCh.send({
+              type: 'broadcast',
+              event: 'offer',
+              payload: { sdp: offer, from: currentUser.id }
+            });
+          } else if (currentRole === 'view') {
+            console.log("[LiveStream] Viewer connected. Requesting SDP offer from host...");
+            signalCh.send({
+              type: 'broadcast',
+              event: 'request-offer',
+              payload: { from: currentUser.id }
+            });
+          }
         }
       });
   };
