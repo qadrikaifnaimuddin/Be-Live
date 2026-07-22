@@ -52,16 +52,16 @@ import { compressImage } from '../lib/imageCompression';
 import { Post, User, Story, Highlight } from '../types';
 import AvatarStudio from './AvatarStudio';
 import RichBioEditor from './RichBioEditor';
-import MediaRenderer from './MediaRenderer';
 import { Music, Video, Link2, Image as ImageIcon, FileText, Users, Type, AlignLeft, AlignCenter, AlignRight, Bold, Italic, Underline, Code, Quote, Palette, Highlighter, Wand2, Terminal, Flame, Smile, Layers, HelpCircle, Activity } from 'lucide-react';
 import AvatarPicker from './AvatarPicker';
-import PostAccessManager from './PostAccessManager';
 import FollowersListModal from './FollowersListModal';
+import { StoriesAndHighlightsView } from './stories/StoriesAndHighlightsView';
+import { StoryViewerModal } from './stories/StoryViewerModal';
+import { CreateHighlightModal } from './stories/CreateHighlightModal';
 
 interface ProfileScreenProps {
   user: User;
   currentUser: User;
-  posts?: Post[];
   stories: Story[];
   highlights: Highlight[];
   onAddHighlight: (title: string, coverUrl: string, storyIds: string[]) => void;
@@ -80,278 +80,15 @@ interface ProfileScreenProps {
     allowAnonymousDMs?: boolean
   ) => void;
   onUpdateProfileSettings?: (updatedFields: Partial<User>) => void;
-  onLikePost?: (postId: string) => void;
-  onAddComment?: (postId: string, text: string, parentId?: string) => void;
   onViewProfile?: (userId: string) => void;
-  onTogglePostVisibility?: (postId: string) => void;
-  onGrantPostAccess?: (postId: string, targetUserId: string, durationMinutes?: number) => void;
-  onRevokePostAccess?: (postId: string, targetUserId: string) => void;
-  allPosts?: Post[];
-  onToggleArchivePost?: (postId: string) => void;
-  onGrantGlobalAccess?: (targetUserId: string, durationMinutes?: number) => void;
-  onRevokeGlobalAccess?: (targetUserId: string) => void;
-  onGrantMultiplePostAccess?: (postIds: string[], targetUserId: string, durationMinutes?: number) => void;
-  onAddPost?: (post: Post) => void;
   onLogout?: () => void;
   onDeleteAccount?: () => void;
   onOpenMessages?: (userId: string) => void;
 }
 
-export function getPostGradientClass(gradientName: string): string {
-  switch (gradientName) {
-    case 'sunset': return 'bg-gradient-to-tr from-pink-500 via-red-500 to-yellow-500 text-white';
-    case 'ocean': return 'bg-gradient-to-tr from-blue-600 via-cyan-500 to-sky-400 text-white';
-    case 'emerald': return 'bg-gradient-to-tr from-emerald-600 to-teal-500 text-white';
-    case 'cyberpunk': return 'bg-gradient-to-tr from-fuchsia-600 to-pink-500 text-white';
-    case 'neon': return 'bg-gradient-to-tr from-purple-600 to-indigo-600 text-white';
-    case 'lava': return 'bg-gradient-to-tr from-orange-600 via-red-600 to-amber-500 text-white shadow-lg';
-    case 'aurora': return 'bg-gradient-to-tr from-teal-500 via-cyan-600 to-indigo-700 text-white shadow-lg';
-    case 'matrix': return 'bg-slate-950 border border-emerald-500/40 text-emerald-400 font-mono';
-    case 'cotton': return 'bg-gradient-to-tr from-rose-200 via-purple-100 to-blue-200 text-stone-100';
-    case 'clean': return 'bg-stone-950/60 border border-stone-850 text-stone-100';
-    case 'cosmic':
-    default: return 'bg-gradient-to-tr from-purple-950 via-indigo-900 to-slate-950 text-white';
-  }
-}
-
-export function hasDecorativeGlow(gradientName: string): boolean {
-  return gradientName !== 'clean' && gradientName !== 'matrix' && gradientName !== 'cotton';
-}
-
-interface MiniPostPreviewProps {
-  post: Post;
-  isPlaying: boolean;
-  onPlayToggle: () => void;
-  onLike: () => void;
-  liked: boolean;
-  onView: () => void;
-}
-
-function MiniPostPreview({ post, isPlaying, onPlayToggle, onLike, liked, onView }: MiniPostPreviewProps) {
-  const videoRef = React.useRef<HTMLVideoElement>(null);
-  const audioRef = React.useRef<HTMLAudioElement>(null);
-
-  React.useEffect(() => {
-    if (videoRef.current) {
-      if (isPlaying) {
-        videoRef.current.play().catch(() => {});
-      } else {
-        videoRef.current.pause();
-      }
-    }
-  }, [isPlaying]);
-
-  React.useEffect(() => {
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.play().catch(() => {});
-      } else {
-        audioRef.current.pause();
-      }
-    }
-  }, [isPlaying]);
-
-  const mediaType = post.mediaType || 'image';
-
-  return (
-    <div className="w-full h-full relative group/media select-none overflow-hidden rounded-2xl bg-slate-950 flex flex-col justify-between">
-      {/* Media content */}
-      {mediaType === 'image' && (
-        <div className="w-full h-full relative cursor-pointer" onClick={onView}>
-          <img 
-            src={post.imageUrl || 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=400&q=80'} 
-            alt={post.caption}
-            referrerPolicy="no-referrer"
-            className="w-full h-full object-cover transition-transform duration-500 group-hover/media:scale-105"
-          />
-        </div>
-      )}
-
-      {mediaType === 'video' && (
-        <div className="w-full h-full relative cursor-pointer flex items-center justify-center" onClick={onPlayToggle}>
-          <video 
-            ref={videoRef}
-            src={post.videoUrl || (post.videos && post.videos[0])}
-            className="w-full h-full object-cover"
-            loop
-            muted
-            playsInline
-          />
-          {/* Play/Pause Overlay */}
-          <div className="absolute inset-0 bg-black/20 flex items-center justify-center transition-all group-hover/media:bg-black/40">
-            <div className="p-2.5 bg-stone-950/60/95 text-stone-100 rounded-full shadow-lg transform group-hover/media:scale-110 transition-all">
-              {isPlaying ? <Pause className="w-3.5 h-3.5 fill-slate-800 stroke-none" /> : <Play className="w-3.5 h-3.5 fill-slate-800 stroke-none translate-x-[0.5px]" />}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {mediaType === 'audio' && (
-        <div className="w-full h-full p-3.5 flex flex-col justify-between relative bg-gradient-to-b from-indigo-950 via-slate-900 to-slate-950 text-white">
-          <audio 
-            ref={audioRef}
-            src={post.audioUrl || (post.audios && post.audios[0]?.url)}
-            loop
-          />
-          
-          <div className="flex items-center gap-2.5">
-            {/* Spinning vinyl disk */}
-            <div className={`relative w-12 h-12 rounded-full bg-slate-900 border-stone-850 border-slate-700/80 shadow-md flex items-center justify-center shrink-0 ${isPlaying ? 'animate-[spin_4s_linear_infinite]' : ''}`}>
-              <div className="w-5 h-5 rounded-full bg-indigo-500 border border-slate-800 flex items-center justify-center overflow-hidden">
-                <Music className="w-2 h-2 text-white animate-pulse" />
-              </div>
-              {/* Central pin hole */}
-              <div className="absolute w-1 h-1 bg-slate-950 rounded-full" />
-            </div>
-
-            <div className="min-w-0 text-left">
-              <span className="text-[8px] font-extrabold text-indigo-400 uppercase tracking-widest block">Sound Track</span>
-              <p className="text-[10px] font-bold text-slate-100 truncate mt-0.5 leading-snug">
-                {post.linkTitle || 'Ambient Creator Audio'}
-              </p>
-              <p className="text-[8px] text-stone-500 truncate">
-                Click play to listen
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between border-t border-stone-900/5 pt-2 mt-1.5">
-            <button 
-              type="button"
-              onClick={onPlayToggle}
-              className="p-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-full transition-all shadow-sm flex items-center justify-center shrink-0"
-            >
-              {isPlaying ? <Pause className="w-3 h-3 fill-white" /> : <Play className="w-3 h-3 fill-white translate-x-[0.5px]" />}
-            </button>
-
-            {/* Jumping audio bars */}
-            {isPlaying ? (
-              <div className="flex items-end gap-[1.5px] h-3 pr-1">
-                <div className="w-[2px] bg-indigo-400 rounded-full animate-[bounce_0.6s_infinite_0.1s] origin-bottom" style={{ height: '60%' }} />
-                <div className="w-[2px] bg-indigo-400 rounded-full animate-[bounce_0.6s_infinite_0.3s] origin-bottom" style={{ height: '100%' }} />
-                <div className="w-[2px] bg-indigo-400 rounded-full animate-[bounce_0.6s_infinite_0.2s] origin-bottom" style={{ height: '40%' }} />
-                <div className="w-[2px] bg-indigo-400 rounded-full animate-[bounce_0.6s_infinite_0.4s] origin-bottom" style={{ height: '80%' }} />
-              </div>
-            ) : (
-              <span className="text-[8px] font-semibold text-stone-400 uppercase tracking-wide pr-1">Audio Paused</span>
-            )}
-          </div>
-        </div>
-      )}
-
-      {mediaType === 'link' && (
-        <div className="w-full h-full p-3.5 flex flex-col justify-between relative bg-gradient-to-b from-sky-950 via-slate-900 to-slate-950 text-white">
-          <div className="space-y-1 text-left">
-            <span className="text-[8px] font-extrabold text-sky-400 uppercase tracking-widest block">Web Surf Link</span>
-            <h6 className="text-[10px] font-bold leading-snug line-clamp-2 text-slate-100">
-              {post.linkTitle || 'Explore Creator Website'}
-            </h6>
-            <p className="text-[8px] text-stone-500 truncate mt-0.5">
-              {post.linkUrl}
-            </p>
-          </div>
-
-          <div className="flex items-center justify-between border-t border-stone-900/5 pt-2 mt-1">
-            <span className="text-[8px] text-sky-300 font-extrabold flex items-center gap-0.5">
-              <Globe className="w-2.5 h-2.5 text-sky-400" />
-              <span>Bookmark</span>
-            </span>
-            <a 
-              href={post.linkUrl} 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="px-2 py-0.5 bg-sky-600 hover:bg-sky-500 text-white text-[9px] font-bold rounded-md transition-all flex items-center gap-0.5"
-            >
-              <span>Surf</span>
-              <ExternalLink className="w-2 h-2" />
-            </a>
-          </div>
-        </div>
-      )}
-
-      {mediaType === 'document' && (
-        <div className="w-full h-full p-3.5 flex flex-col justify-between relative bg-gradient-to-b from-amber-950 via-slate-900 to-slate-950 text-white">
-          <div className="space-y-1 text-left">
-            <span className="text-[8px] font-extrabold text-amber-400 uppercase tracking-widest block">Document Brief</span>
-            <h6 className="text-[10px] font-bold leading-snug line-clamp-1 text-slate-100">
-              {post.documentTitle || post.linkTitle || 'Project Plan.pdf'}
-            </h6>
-            <p className="text-[8px] text-stone-500 font-mono line-clamp-2 leading-relaxed bg-black/30 p-1.5 rounded border border-stone-900/5 mt-0.5">
-              {post.caption ? post.caption.replace(/<[^>]*>/g, '') : 'No preview available'}
-            </p>
-          </div>
-
-          <div className="flex items-center justify-between border-t border-stone-900/5 pt-2 mt-1">
-            <span className="text-[8px] text-amber-300 font-extrabold font-mono flex items-center gap-0.5 uppercase">
-              <FileText className="w-2.5 h-2.5 text-amber-400" />
-              <span>Doc Brief</span>
-            </span>
-            <button 
-              type="button"
-              onClick={onView}
-              className="px-2 py-0.5 bg-amber-600 hover:bg-amber-500 text-white text-[9px] font-bold rounded-md transition-all flex items-center gap-0.5"
-            >
-              <span>Read</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {mediaType === 'text' && (
-        <div className="w-full h-full relative cursor-pointer" onClick={onView}>
-          <div className={`w-full h-full flex flex-col justify-between p-3 relative overflow-hidden select-none transition-all duration-300 ${getPostGradientClass(post.textGradient)} ${
-            post.textFont === 'serif' ? 'font-serif' :
-            post.textFont === 'mono' ? 'font-mono' : 'font-sans'
-          }`}>
-            {hasDecorativeGlow(post.textGradient) && (
-              <div className="absolute -right-6 -top-6 w-16 h-16 bg-stone-950/60/10 rounded-full blur-lg pointer-events-none" />
-            )}
-            <div className={`flex-1 flex items-center justify-center text-center overflow-hidden leading-snug break-words ${
-              post.textAlign === 'left' ? 'text-left' :
-              post.textAlign === 'right' ? 'text-right' : 'text-center'
-            } ${
-              post.textFontSize === 'sm' ? 'text-[9px]' :
-              post.textFontSize === 'lg' ? 'text-[10px] md:text-[11px]' :
-              post.textFontSize === 'xl' ? 'text-[11px] md:text-xs font-extrabold' : 'text-[9px]'
-            }`}>
-              <div 
-                dangerouslySetInnerHTML={{ __html: post.caption }} 
-                className="w-full max-h-full overflow-hidden line-clamp-3 text-ellipsis"
-              />
-            </div>
-            <div className="text-[7px] opacity-60 flex justify-between items-center mt-1 border-t border-stone-900/10 pt-1">
-              <span>Thought</span>
-              <span>{post.caption.replace(/<[^>]*>/g, '').length} chars</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Floating like button over preview */}
-      <button 
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onLike();
-        }}
-        className={`absolute bottom-3 right-3 p-1 rounded-full backdrop-blur-md transition-all shadow-md flex items-center gap-1.5 z-10 ${
-          liked 
-            ? 'bg-rose-500 text-white shadow-rose-200' 
-            : 'bg-black/50 text-white/90 hover:bg-black/70 hover:text-white'
-        }`}
-      >
-        <Heart className={`w-3 h-3 ${liked ? 'fill-white stroke-none animate-[pulse_0.4s_ease-out_1]' : 'stroke-[2]'}`} />
-        <span className="text-[8px] font-extrabold px-0.5">{post.likes.length}</span>
-      </button>
-    </div>
-  );
-}
-
 export default function ProfileScreen({
   user,
   currentUser,
-  posts = [],
-  allPosts = [],
   stories,
   highlights,
   onAddHighlight,
@@ -361,23 +98,11 @@ export default function ProfileScreen({
   onToggleFollow,
   onUpdateProfile,
   onUpdateProfileSettings,
-  onLikePost,
-  onAddComment,
   onViewProfile,
-  onTogglePostVisibility,
-  onGrantPostAccess,
-  onRevokePostAccess,
-  onToggleArchivePost,
-  onGrantGlobalAccess,
-  onRevokeGlobalAccess,
-  onGrantMultiplePostAccess,
-  onAddPost,
   onLogout,
   onDeleteAccount
 }: ProfileScreenProps) {
   const [isEditing, setIsEditing] = useState(false);
-  const [activeCreatorPostIds, setActiveCreatorPostIds] = useState<Record<string, string>>({});
-  const [playingPostId, setPlayingPostId] = useState<string | null>(null);
   const [showAvatarLightbox, setShowAvatarLightbox] = useState(false);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const lightboxFileInputRef = React.useRef<HTMLInputElement>(null);
@@ -800,9 +525,6 @@ export default function ProfileScreen({
   const [enteredOtp, setEnteredOtp] = useState('');
   const [otpError, setOtpError] = useState<string | null>(null);
 
-  const [selectedPost, setSelectedPost] = useState<Post | null>(null);
-  const [commentText, setCommentText] = useState('');
-
   // Profile sharing states
   const [isSharingProfile, setIsSharingProfile] = useState(false);
   const [shareSuccess, setShareSuccess] = useState<string | null>(null);
@@ -828,7 +550,6 @@ export default function ProfileScreen({
 
     fetchFollowStats();
 
-    // Subscribe to realtime changes on relationships to reload stats dynamically
     const channel = supabase
       .channel(`profile-follow-stats-${user.id}`)
       .on('postgres_changes', {
@@ -845,7 +566,7 @@ export default function ProfileScreen({
     };
   }, [user.id]);
 
-  // Chat rooms available for profile sharing — fetched from DB when modal opens
+  // Chat rooms available for profile sharing
   const [shareChatRooms, setShareChatRooms] = useState<any[]>([]);
   React.useEffect(() => {
     if (!isSharingProfile || !isSupabaseConfigured || !supabase) return;
@@ -868,161 +589,7 @@ export default function ProfileScreen({
   const [newHighlightTitle, setNewHighlightTitle] = useState('');
   const [selectedStoryIds, setSelectedStoryIds] = useState<string[]>([]);
 
-  // Profile Media Filter sub-tab (Images, Videos, Audios, Links, Docs, Text)
-  const [profileMediaFilter, setProfileMediaFilter] = useState<'all' | 'image' | 'video' | 'audio' | 'link' | 'document' | 'text'>('all');
-  const [activeSubVisibility, setActiveSubVisibility] = useState<'public' | 'private'>('public');
 
-  // Twitter-like Text Post Composer states
-  const [textPostContent, setTextPostContent] = useState('');
-  const [textPostGradient, setTextPostGradient] = useState<string>('cosmic');
-  const [textPostFont, setTextPostFont] = useState<string>('sans');
-  const [textPostAlign, setTextPostAlign] = useState<'left' | 'center' | 'right'>('center');
-  const [textPostFontSize, setTextPostFontSize] = useState<string>('base');
-  const [isTextComposerOpen, setIsTextComposerOpen] = useState(false);
-  const [activeFormatTab, setActiveFormatTab] = useState<'styles' | 'effects' | 'widgets' | 'motions' | 'templates'>('styles');
-  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
-
-  const insertFormat = (tag: string) => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const text = textarea.value;
-    const selectedText = text.substring(start, end);
-    
-    let replacement = '';
-    if (tag === 'bold') replacement = `<b>${selectedText || 'bold'}</b>`;
-    else if (tag === 'italic') replacement = `<i>${selectedText || 'italic'}</i>`;
-    else if (tag === 'underline') replacement = `<u>${selectedText || 'underline'}</u>`;
-    else if (tag === 'strike') replacement = `<s>${selectedText || 'strikethrough'}</s>`;
-    else if (tag === 'code') replacement = `<code>${selectedText || 'code'}</code>`;
-    else if (tag === 'quote') replacement = `<blockquote>${selectedText || 'quote'}</blockquote>`;
-    else if (tag === 'sparkles') replacement = `<span class="text-yellow-300 font-extrabold">✨ ${selectedText || 'sparkle text'} ✨</span>`;
-    else if (tag === 'neon-pink') replacement = `<span class="text-pink-400 font-bold" style="text-shadow: 0 0 8px rgba(244,114,182,0.8);">${selectedText || 'neon glow'}</span>`;
-    else if (tag === 'neon-blue') replacement = `<span class="text-cyan-300 font-bold" style="text-shadow: 0 0 8px rgba(34,211,238,0.8);">${selectedText || 'blue glow'}</span>`;
-    else if (tag === 'rainbow') replacement = `<span class="font-extrabold tracking-wide" style="background: linear-gradient(to right, #ff2a5f, #ff7e40, #ffeb3b, #4caf50, #00bcd4, #ab47bc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; filter: drop-shadow(0px 1px 1px rgba(0,0,0,0.35));">${selectedText || 'rainbow text'}</span>`;
-    else if (tag === 'yellow-highlight') replacement = `<span class="bg-yellow-300 text-slate-950 font-semibold px-1 rounded">${selectedText || 'highlight'}</span>`;
-    else if (tag === 'spoiler') replacement = `<span class="bg-slate-900 text-stone-50 hover:text-white transition-all duration-300 cursor-help rounded px-1.5 py-0.5 select-none" title="Hover to reveal spoiler!">${selectedText || 'spoiler text'}</span>`;
-    else if (tag === 'bounce') replacement = `<span class="inline-block animate-bounce origin-bottom font-semibold">${selectedText || 'bouncy'}</span>`;
-    else if (tag === 'pulse') replacement = `<span class="inline-block animate-pulse font-semibold text-yellow-300">${selectedText || 'pulsing'}</span>`;
-    else if (tag === 'badge') replacement = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-stone-950/60/20 text-white border border-stone-900/30 backdrop-blur-sm mx-1">${selectedText || 'badge'}</span>`;
-    else if (tag === 'terminal') replacement = `<span class="font-mono text-[10px] bg-black/40 text-green-400 px-1.5 py-1 rounded border border-green-500/30 font-semibold block my-1 text-left">$&gt; ${selectedText || 'code output'}</span>`;
-    else if (tag === 'callout') replacement = `<span class="block bg-stone-950/60/10 border-l-4 border-yellow-400 p-2 rounded-r-xl my-1 text-[11px] backdrop-blur-sm text-left italic">💡 ${selectedText || 'important note'}</span>`;
-    else if (tag === 'cursive') replacement = `<span class="font-serif italic text-yellow-200 tracking-wider font-semibold">${selectedText || 'cursive text'}</span>`;
-
-    const newText = text.substring(0, start) + replacement + text.substring(end);
-    setTextPostContent(newText);
-    
-    // Put focus back and restore selection cursor
-    setTimeout(() => {
-      textarea.focus();
-      const offset = replacement.length;
-      textarea.setSelectionRange(start + offset, start + offset);
-    }, 50);
-  };
-
-  const insertTemplate = (templateName: string) => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-
-    let templateHtml = '';
-    if (templateName === 'quote') {
-      templateHtml = `<blockquote class="border-l-4 border-purple-400 pl-4 py-2 my-2 italic text-center font-serif text-sm">
-  "Be yourself; everyone else is already taken."
-  <cite class="block text-[10px] uppercase font-mono tracking-widest text-right mt-1 opacity-70">— Oscar Wilde</cite>
-</blockquote>`;
-    } else if (templateName === 'checklist') {
-      templateHtml = `<div class="text-left bg-black/10 p-3 rounded-2xl border border-stone-900/10 my-2 space-y-1.5 font-sans">
-  <div class="font-bold text-[10px] uppercase tracking-wider text-pink-300 border-b border-stone-900/5 pb-1 flex justify-between"><span>📋 My Goals</span> <span>🔥 3/3</span></div>
-  <div class="text-xs flex items-center gap-1.5">✅ <span>Learn Framer Motion API</span></div>
-  <div class="text-xs flex items-center gap-1.5">✅ <span>Design avatar shaders</span></div>
-  <div class="text-xs flex items-center gap-1.5">✅ <span>Sip a hot matcha latte</span></div>
-</div>`;
-    } else if (templateName === 'terminal') {
-      templateHtml = `<div class="bg-slate-950 text-emerald-400 p-3 rounded-2xl font-mono text-[10px] border border-emerald-500/20 text-left my-2 relative">
-  <div class="absolute top-2 right-3 w-2.5 h-2.5 rounded-full bg-red-500 shadow shadow-red-500/50" />
-  <span class="text-stone-400">$</span> npm run build:instaframe<br/>
-  <span class="text-slate-300">✓ App compiled successfully</span><br/>
-  <span class="text-stone-400">Total size:</span> <span class="text-yellow-300 font-bold">142 KB</span>
-</div>`;
-    } else if (templateName === 'banner') {
-      templateHtml = `<div class="py-2 text-center border-y-2 border-dashed border-stone-900/20 my-2 font-mono uppercase tracking-widest text-[11px] font-bold text-yellow-300 bg-stone-950/60/5 animate-pulse">
-  ⚡ NOW STREAMING LIVE ⚡
-</div>`;
-    } else if (templateName === 'alert') {
-      templateHtml = `<div class="bg-red-500/10 border-l-4 border-red-500 p-3 rounded-r-2xl my-2 text-left text-xs font-sans">
-  <span class="font-extrabold text-red-400 uppercase tracking-wider block mb-1">🚨 CRITICAL UPDATE</span>
-  <span class="opacity-90 leading-normal">System backup initiated. Expect offline latency. Save all active drafts.</span>
-</div>`;
-    }
-
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const text = textarea.value;
-
-    const newText = text.substring(0, start) + templateHtml + text.substring(end);
-    setTextPostContent(newText);
-
-    setTimeout(() => {
-      textarea.focus();
-      const offset = templateHtml.length;
-      textarea.setSelectionRange(start + offset, start + offset);
-    }, 50);
-    playSpatialAvatarSound(500, 0, 'click');
-  };
-
-  const insertEmoji = (emoji: string) => {
-    const textarea = textareaRef.current;
-    if (!textarea) {
-      setTextPostContent(prev => prev + emoji);
-      return;
-    }
-
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const text = textarea.value;
-
-    const newText = text.substring(0, start) + emoji + text.substring(end);
-    setTextPostContent(newText);
-
-    setTimeout(() => {
-      textarea.focus();
-      textarea.setSelectionRange(start + emoji.length, start + emoji.length);
-    }, 50);
-  };
-
-  const handleCreateTextPost = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!textPostContent.trim()) return;
-
-    if (onAddPost) {
-      const newPost: Post = {
-        id: `post_${Date.now()}`,
-        userId: currentUser.id,
-        username: currentUser.username,
-        userAvatar: currentUser.avatar,
-        imageUrl: '', // Text-only posts don't have an image
-        caption: textPostContent,
-        likes: [],
-        comments: [],
-        createdAt: 'Just now',
-        mediaType: 'text',
-        visibility: activeSubVisibility, // Respect public or private
-        textGradient: textPostGradient,
-        textFont: textPostFont,
-        textAlign: textPostAlign,
-        textFontSize: textPostFontSize
-      };
-      
-      onAddPost(newPost);
-      setTextPostContent('');
-      playSpatialAvatarSound(600, 0, 'success');
-    }
-  };
-
-  // Profile-level multi-select mode for own private posts sharing
-  const [isProfileMultiSelectMode, setIsProfileMultiSelectMode] = useState(false);
 
   // Followers / Following Modal States
   const [connectionsModalType, setConnectionsModalType] = useState<'followers' | 'following' | null>(null);
@@ -1412,29 +979,6 @@ export default function ProfileScreen({
     }
   };
 
-  // Filter posts created by this specific user
-  const userPosts = posts.filter((p) => p.userId === user.id);
-
-  // Filter based on active media subtab
-  const filteredByMediaType = userPosts.filter((post) => {
-    if (profileMediaFilter === 'all') return true;
-    const mType = post.mediaType || 'image';
-    return mType === profileMediaFilter;
-  });
-
-  // Count public and private posts matching the current category
-  const publicCount = filteredByMediaType.filter((post) => post.visibility !== 'private').length;
-  const privateCount = filteredByMediaType.filter((post) => post.visibility === 'private').length;
-
-  // Filter based on active sub-visibility selection
-  const displayPosts = filteredByMediaType.filter((post) => {
-    if (activeSubVisibility === 'private') {
-      return post.visibility === 'private';
-    } else {
-      return post.visibility !== 'private';
-    }
-  });
-
   // Filter highlights created by this specific user
   const userHighlights = highlights.filter((h) => h.userId === user.id);
 
@@ -1446,44 +990,6 @@ export default function ProfileScreen({
     const ageMs = Date.now() - new Date(s.createdAt).getTime();
     return ageMs < 24 * 60 * 60 * 1000;
   };
-
-  // Profile section navigation state ('posts' or 'archive' or 'privateSharing' or 'saved')
-  const [activeSection, setActiveSection] = useState<'posts' | 'archive' | 'privateSharing' | 'saved'>('posts');
-  // Archive subsection state ('stories' or 'posts')
-  const [archiveSubSection, setArchiveSubSection] = useState<'stories' | 'posts'>('stories');
-
-  // Private sharing tab states
-  const [selectedUserForGlobalShare, setSelectedUserForGlobalShare] = useState('');
-  const [globalShareDuration, setGlobalShareDuration] = useState('0');
-  const [globalCustomMinutes, setGlobalCustomMinutes] = useState('');
-
-  const [selectedUserForMultiShare, setSelectedUserForMultiShare] = useState('');
-  const [multiShareDuration, setMultiShareDuration] = useState('0');
-  const [multiCustomMinutes, setMultiCustomMinutes] = useState('');
-  const [selectedPostIdsForShare, setSelectedPostIdsForShare] = useState<string[]>([]);
-  const [sharingFeedback, setSharingFeedback] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (activeSubVisibility !== 'private' || activeSection !== 'posts') {
-      setIsProfileMultiSelectMode(false);
-      setSelectedPostIdsForShare([]);
-    }
-  }, [activeSubVisibility, activeSection]);
-
-  const [shareableUsers, setShareableUsers] = useState<User[]>([]);
-  useEffect(() => {
-    fetch('/api/users')
-      .then(res => res.json())
-      .then((list: User[]) => {
-        setShareableUsers(list);
-      })
-      .catch(console.error);
-  }, [activeSection, connectionsModalType]);
-
-  // Single archived story viewer states
-  const [activeArchivedStory, setActiveArchivedStory] = useState<Story | null>(null);
-  const [archivedStoryProgress, setArchivedStoryProgress] = useState(0);
-  const [showAddToHighlightDropdown, setShowAddToHighlightDropdown] = useState(false);
 
   const [isUploadingStory, setIsUploadingStory] = useState(false);
   const storyFileInputRef = React.useRef<HTMLInputElement>(null);
@@ -1548,14 +1054,17 @@ export default function ProfileScreen({
     }
   };
 
-  // Filter archived stories (older than 24 hours)
-  const archivedUserStories = userStories.filter((s) => !isStoryActive(s));
-
-  // Filter archived posts belonging to this user
-  const archivedUserPosts = allPosts.filter((p) => p.userId === user.id && p.isArchived);
-
-  // Filter bookmarked/saved posts for the current user
-  const savedPosts = allPosts.filter((p) => (currentUser?.savedPostIds || []).includes(p.id));
+  // Users available for profile sharing
+  const [shareableUsers, setShareableUsers] = useState<User[]>([]);
+  useEffect(() => {
+    if (!isSharingProfile) return;
+    fetch('/api/users')
+      .then(res => res.json())
+      .then((list: User[]) => {
+        if (Array.isArray(list)) setShareableUsers(list);
+      })
+      .catch(console.error);
+  }, [isSharingProfile]);
 
   // Poll for expired timers every 5 seconds to keep countdowns and visibility active
   const [, setTick] = useState(0);
@@ -1646,144 +1155,7 @@ export default function ProfileScreen({
     setIsEditing(false);
   };
 
-  const handleGlobalGrantSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedUserForGlobalShare) return;
 
-    let duration: number | undefined = undefined;
-    if (globalShareDuration === 'custom') {
-      const mins = parseInt(globalCustomMinutes);
-      if (!isNaN(mins) && mins > 0) {
-        duration = mins;
-      }
-    } else {
-      const mins = parseInt(globalShareDuration);
-      if (mins > 0) {
-        duration = mins;
-      }
-    }
-
-    if (onGrantGlobalAccess) {
-      onGrantGlobalAccess(selectedUserForGlobalShare, duration);
-      
-      const targetUser = shareableUsers.find(u => u.id === selectedUserForGlobalShare);
-      setSharingFeedback(`Successfully granted full private section access to @${targetUser?.username || 'user'}!`);
-      setTimeout(() => setSharingFeedback(null), 4000);
-
-      // Reset fields
-      setSelectedUserForGlobalShare('');
-      setGlobalShareDuration('0');
-      setGlobalCustomMinutes('');
-    }
-  };
-
-  const handleGlobalRevokeSubmit = (targetUserId: string) => {
-    if (onRevokeGlobalAccess) {
-      onRevokeGlobalAccess(targetUserId);
-      const targetUser = shareableUsers.find(u => u.id === targetUserId);
-      setSharingFeedback(`Revoked private section access for @${targetUser?.username || 'user'}.`);
-      setTimeout(() => setSharingFeedback(null), 4000);
-    }
-  };
-
-  const handleMultiGrantSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedUserForMultiShare || selectedPostIdsForShare.length === 0) return;
-
-    let duration: number | undefined = undefined;
-    if (multiShareDuration === 'custom') {
-      const mins = parseInt(multiCustomMinutes);
-      if (!isNaN(mins) && mins > 0) {
-        duration = mins;
-      }
-    } else {
-      const mins = parseInt(multiShareDuration);
-      if (mins > 0) {
-        duration = mins;
-      }
-    }
-
-    if (onGrantMultiplePostAccess) {
-      onGrantMultiplePostAccess(selectedPostIdsForShare, selectedUserForMultiShare, duration);
-      
-      const targetUser = shareableUsers.find(u => u.id === selectedUserForMultiShare);
-      setSharingFeedback(`Successfully granted access to ${selectedPostIdsForShare.length} posts for @${targetUser?.username || 'user'}!`);
-      setTimeout(() => setSharingFeedback(null), 4000);
-
-      // Reset fields
-      setSelectedUserForMultiShare('');
-      setMultiShareDuration('0');
-      setMultiCustomMinutes('');
-      setSelectedPostIdsForShare([]);
-      setIsProfileMultiSelectMode(false);
-    }
-  };
-
-  const togglePostSelectionForShare = (postId: string) => {
-    if (selectedPostIdsForShare.includes(postId)) {
-      setSelectedPostIdsForShare(selectedPostIdsForShare.filter(id => id !== postId));
-    } else {
-      setSelectedPostIdsForShare([...selectedPostIdsForShare, postId]);
-    }
-  };
-
-  const selectAllPrivatePosts = () => {
-    const ownPrivatePosts = allPosts.filter(p => p.userId === currentUser.id && p.visibility === 'private');
-    setSelectedPostIdsForShare(ownPrivatePosts.map(p => p.id));
-  };
-
-  const deselectAllPrivatePosts = () => {
-    setSelectedPostIdsForShare([]);
-  };
-
-  const handlePostClick = (post: Post) => {
-    setSelectedPost(post);
-    setCommentText('');
-  };
-
-  const handleAddComment = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!commentText.trim() || !selectedPost) return;
-
-    onAddComment(selectedPost.id, commentText);
-    
-    // Update local modal state
-    const updatedPost = posts.find((p) => p.id === selectedPost.id);
-    if (updatedPost) {
-      const tempUpdated = {
-        ...selectedPost,
-        comments: [
-          ...selectedPost.comments,
-          {
-            id: `temp_${Date.now()}`,
-            postId: selectedPost.id,
-            username: currentUser.username,
-            avatar: currentUser.avatar,
-            text: commentText,
-            createdAt: 'Just now'
-          }
-        ]
-      };
-      setSelectedPost(tempUpdated);
-    }
-    setCommentText('');
-  };
-
-  const handleLikeSelected = () => {
-    if (!selectedPost) return;
-    onLikePost(selectedPost.id);
-    
-    // Update local modal state
-    const isLiked = selectedPost.likes.includes(currentUser.id);
-    const updatedLikes = isLiked
-      ? selectedPost.likes.filter((id) => id !== currentUser.id)
-      : [...selectedPost.likes, currentUser.id];
-    
-    setSelectedPost({
-      ...selectedPost,
-      likes: updatedLikes
-    });
-  };
 
   // Auto-advance highlight stories timer
   useEffect(() => {
@@ -1810,31 +1182,7 @@ export default function ProfileScreen({
     return () => clearInterval(timer);
   }, [activeHighlight, activeStoryIndex]);
 
-  // Auto-advance archived story playback timer
-  useEffect(() => {
-    if (!activeArchivedStory) {
-      setArchivedStoryProgress(0);
-      return;
-    }
 
-    setArchivedStoryProgress(0);
-    const intervalTime = 40;
-    const totalTime = 4000; // story stays for 4s
-    const step = (intervalTime / totalTime) * 100;
-
-    const timer = setInterval(() => {
-      setArchivedStoryProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(timer);
-          setActiveArchivedStory(null);
-          return 0;
-        }
-        return prev + step;
-      });
-    }, intervalTime);
-
-    return () => clearInterval(timer);
-  }, [activeArchivedStory]);
 
   const handleNextHighlightStory = () => {
     if (!activeHighlight) return;
@@ -2078,177 +1426,30 @@ export default function ProfileScreen({
       ) : (
         <>
           {/* ====== INSTAGRAM CIRCULAR HIGHLIGHTS ====== */}
-      <div className="mb-8 px-2">
-        <h4 className="text-xs font-bold text-stone-500 uppercase tracking-wider mb-3">Highlights</h4>
-        <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-none">
-          {/* Add Story Circle (Only on own profile) */}
-          {isOwnProfile && (
-            <div className="flex flex-col items-center shrink-0">
-              <button
-                onClick={() => storyFileInputRef.current?.click()}
-                className="w-16 h-16 rounded-full border border-dashed border-stone-850 bg-stone-950/80 hover:bg-stone-900 flex items-center justify-center text-stone-300 hover:text-indigo-400 transition-all active:scale-95 cursor-pointer shadow-sm relative overflow-hidden"
-                title="Post a Story"
-              >
-                <Plus className="w-6 h-6 stroke-[2.5px]" />
-                {isUploadingStory && (
-                  <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                    <Loader2 className="w-5 h-5 animate-spin text-indigo-400" />
-                  </div>
-                )}
-              </button>
-              <span className="text-[11px] text-stone-400 font-bold mt-2">Add Story</span>
-              <input
-                ref={storyFileInputRef}
-                type="file"
-                accept="image/*,video/*"
-                className="hidden"
-                onChange={handleStoryUpload}
-              />
-            </div>
-          )}
-
-          {/* Create New Highlight Circle (Only on own profile) */}
-          {isOwnProfile && (
-            <div className="flex flex-col items-center shrink-0">
-              <button
-                onClick={() => {
-                  if (userStories.length === 0) {
-                    alert("You don't have any posted stories yet! Please click 'Add Story' to upload one first.");
-                  } else {
-                    setIsCreatingHighlight(true);
-                  }
-                }}
-                className="w-16 h-16 rounded-full border border-slate-300 bg-stone-950/80 hover:bg-stone-950/40 flex items-center justify-center text-stone-300 hover:text-purple-600 transition-all active:scale-95 cursor-pointer shadow-sm"
-                title="Create New Highlight"
-              >
-                <Plus className="w-6 h-6 stroke-[2.5px]" />
-              </button>
-              <span className="text-[11px] text-stone-400 font-bold mt-2">New</span>
-            </div>
-          )}
-
-          {/* User's compiled Highlights list */}
-          {userHighlights.map((hl) => (
-            <div
-              key={hl.id}
-              onClick={() => handleStartHighlightPlay(hl)}
-              className="flex flex-col items-center shrink-0 cursor-pointer group"
-            >
-              <div className="w-16 h-16 rounded-full p-[2.5px] border border-stone-800 group-hover:scale-105 transition-transform bg-stone-950/60 overflow-hidden shadow-sm">
-                <img
-                  src={hl.coverUrl || 'https://images.unsplash.com/photo-1513836279014-a89f7a76ae86?auto=format&fit=crop&w=150&h=150&q=80'}
-                  alt={hl.title}
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full rounded-full object-cover"
-                />
-              </div>
-              <span className="text-[11px] text-stone-400 font-bold mt-2 max-w-[68px] truncate group-hover:text-stone-100">
-                {hl.title}
-              </span>
-            </div>
-          ))}
-
-          {/* Fallback empty view */}
-          {!isOwnProfile && userHighlights.length === 0 && (
-            <div className="text-xs text-stone-500 italic py-2 flex items-center gap-1.5">
-              <FolderHeart className="w-4 h-4 text-slate-300" />
-              <span>No highlights featured on this profile.</span>
-            </div>
-          )}
-        </div>
-      </div>
+          <StoriesAndHighlightsView
+            isOwnProfile={isOwnProfile}
+            userStories={userStories}
+            userHighlights={userHighlights}
+            isUploadingStory={isUploadingStory}
+            storyFileInputRef={storyFileInputRef}
+            onStoryUpload={handleStoryUpload}
+            onOpenCreateHighlight={() => setIsCreatingHighlight(true)}
+            onSelectHighlight={handleStartHighlightPlay}
+          />
         </>
       )}
 
       {/* ====== HIGHLIGHT CREATOR MODAL ====== */}
-      <AnimatePresence>
-        {isCreatingHighlight && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 cursor-pointer" onClick={() => setIsCreatingHighlight(false)} />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              className="bg-stone-950/60 rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl relative z-10 space-y-5 text-left"
-            >
-              <div className="flex justify-between items-center border-b border-stone-900 pb-3">
-                <div className="flex items-center gap-2 text-purple-600">
-                  <FolderHeart className="w-5 h-5" />
-                  <h3 className="font-extrabold text-lg text-stone-100">New Highlight</h3>
-                </div>
-                <button
-                  onClick={() => setIsCreatingHighlight(false)}
-                  className="p-1 rounded-full bg-stone-950/40 hover:bg-stone-850 text-stone-500 hover:text-stone-300 cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <form onSubmit={handleCreateHighlightSubmit} className="space-y-4">
-                {/* Title */}
-                <div>
-                  <label className="block text-xs font-bold text-stone-400 mb-1.5 uppercase tracking-wider">Highlight Title</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Kyoto 🇯🇵, Summer Vibes ☀️..."
-                    value={newHighlightTitle}
-                    onChange={(e) => setNewHighlightTitle(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-stone-950/60 border border-stone-850 rounded-2xl text-sm focus:border-purple-500 outline-none transition-all"
-                  />
-                </div>
-
-                {/* Checklist of stories */}
-                <div>
-                  <label className="block text-xs font-bold text-stone-400 mb-2 uppercase tracking-wider">Select Stories to Include</label>
-                  <div className="max-h-[220px] overflow-y-auto border border-stone-900 bg-stone-950/80 rounded-2xl p-3 grid grid-cols-3 gap-2.5">
-                    {userStories.map((story) => {
-                      const isChecked = selectedStoryIds.includes(story.id);
-                      return (
-                        <div
-                          key={story.id}
-                          onClick={() => toggleStorySelection(story.id)}
-                          className={`relative aspect-square rounded-xl overflow-hidden cursor-pointer border-stone-850 transition-all ${
-                            isChecked ? 'border-purple-600 scale-[0.98]' : 'border-transparent opacity-75 hover:opacity-100'
-                          }`}
-                        >
-                          <img
-                            src={story.mediaUrl}
-                            alt="Story thumbnail"
-                            referrerPolicy="no-referrer"
-                            className="w-full h-full object-cover"
-                          />
-                          <div className={`absolute top-1.5 right-1.5 rounded-full p-0.5 border ${
-                            isChecked ? 'bg-purple-600 text-white border-stone-900' : 'bg-black/40 text-transparent border-stone-900/40'
-                          }`}>
-                            <Check className="w-3 h-3 stroke-[3.5px]" />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="flex gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsCreatingHighlight(false)}
-                    className="flex-1 py-3 bg-stone-950/40 hover:bg-stone-850 text-stone-300 font-bold rounded-2xl text-xs transition-all cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex-1 py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-2xl text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md"
-                  >
-                    Create Highlight
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <CreateHighlightModal
+        isOpen={isCreatingHighlight}
+        userStories={userStories}
+        newHighlightTitle={newHighlightTitle}
+        selectedStoryIds={selectedStoryIds}
+        onTitleChange={setNewHighlightTitle}
+        onToggleStorySelection={toggleStorySelection}
+        onSubmit={handleCreateHighlightSubmit}
+        onClose={() => setIsCreatingHighlight(false)}
+      />
 
       {/* ====== EDIT PROFILE MODAL OVERLAY ====== */}
       <AnimatePresence>
@@ -2476,269 +1677,18 @@ export default function ProfileScreen({
 
 
       {/* ====== FULLSCREEN HIGHLIGHT STORY VIEWER ====== */}
-      <AnimatePresence>
-        {activeHighlight && (
-          <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md z-50 flex items-center justify-center select-none">
-            <div className="absolute inset-0 cursor-default" onClick={() => setActiveHighlight(null)} />
+      <StoryViewerModal
+        activeHighlight={activeHighlight}
+        activeStoryIndex={activeStoryIndex}
+        storyProgress={storyProgress}
+        stories={stories}
+        user={user}
+        onClose={() => setActiveHighlight(null)}
+        onPrevStory={handlePrevHighlightStory}
+        onNextStory={handleNextHighlightStory}
+      />
 
-            {/* Left/Right manual controls */}
-            <div className="absolute left-6 top-1/2 -translate-y-1/2 z-10 hidden md:block">
-              <button
-                onClick={(e) => { e.stopPropagation(); handlePrevHighlightStory(); }}
-                className="p-3 bg-stone-950/60/10 hover:bg-stone-950/60/20 text-white rounded-full transition-all backdrop-blur-sm cursor-pointer"
-              >
-                <ChevronLeft className="w-6 h-6 stroke-[3px]" />
-              </button>
-            </div>
-            <div className="absolute right-6 top-1/2 -translate-y-1/2 z-10 hidden md:block">
-              <button
-                onClick={(e) => { e.stopPropagation(); handleNextHighlightStory(); }}
-                className="p-3 bg-stone-950/60/10 hover:bg-stone-950/60/20 text-white rounded-full transition-all backdrop-blur-sm cursor-pointer"
-              >
-                <ChevronRight className="w-6 h-6 stroke-[3px]" />
-              </button>
-            </div>
 
-            {/* Playback Container */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="relative w-full max-w-[430px] aspect-[9/16] md:rounded-[40px] bg-black shadow-2xl overflow-hidden flex flex-col z-10"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Media Element */}
-              <div className="absolute inset-0 z-0 bg-slate-900">
-                {stories.find((s) => s.id === activeHighlight.storyIds[activeStoryIndex]) ? (
-                  <div className="relative w-full h-full flex items-center justify-center">
-                    <img
-                      src={stories.find((s) => s.id === activeHighlight.storyIds[activeStoryIndex])?.mediaUrl}
-                      alt="Highlight story content"
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover"
-                    />
-
-                    {/* Highlight Cover Caption */}
-                    <div className="absolute bottom-12 left-4 right-4 text-center z-10">
-                      <span className="inline-block px-4 py-2 bg-purple-900/80 border border-purple-500/20 backdrop-blur-sm text-white rounded-2xl text-xs font-bold leading-relaxed shadow-lg max-w-[90%] mx-auto">
-                        Featured in &ldquo;{activeHighlight.title}&rdquo; 💖
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-stone-400 italic text-xs">
-                    This story could not be loaded.
-                  </div>
-                )}
-              </div>
-
-              {/* Segmented Progress bar & user header */}
-              <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/85 via-black/45 to-transparent z-10 space-y-3.5">
-                {/* Segmented indicator bars */}
-                <div className="flex gap-1">
-                  {activeHighlight.storyIds.map((_, idx) => (
-                    <div key={idx} className="flex-1 h-1 bg-stone-950/60/30 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-stone-950/60 transition-all duration-[40ms] ease-linear"
-                        style={{
-                          width:
-                            idx < activeStoryIndex
-                              ? '100%'
-                              : idx === activeStoryIndex
-                              ? `${storyProgress}%`
-                              : '0%'
-                        }}
-                      />
-                    </div>
-                  ))}
-                </div>
-
-                {/* User Snapshot */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <img
-                      src={user.avatar}
-                      alt={user.name}
-                      referrerPolicy="no-referrer"
-                      className="w-9 h-9 rounded-full object-cover border border-stone-900/20 shadow-md"
-                    />
-                    <div className="text-left">
-                      <span className="font-bold text-xs text-white block leading-tight">
-                        {user.username}
-                      </span>
-                      <span className="text-[9px] text-purple-200 font-bold flex items-center gap-1">
-                        <FolderHeart className="w-2.5 h-2.5" /> Highlight &bull; {activeHighlight.title}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setActiveHighlight(null)}
-                      className="p-1.5 bg-black/45 hover:bg-black/60 rounded-full text-white/95 transition-colors cursor-pointer"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Tap overlays */}
-              <div className="absolute inset-0 z-5 flex">
-                <div className="w-1/3 h-full cursor-pointer" onClick={handlePrevHighlightStory} />
-                <div className="w-1/3 h-full" />
-                <div className="w-1/3 h-full cursor-pointer" onClick={handleNextHighlightStory} />
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* ====== FULLSCREEN ARCHIVED STORY VIEWER ====== */}
-      <AnimatePresence>
-        {activeArchivedStory && (
-          <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md z-50 flex items-center justify-center select-none">
-            <div className="absolute inset-0 cursor-default" onClick={() => setActiveArchivedStory(null)} />
-
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="relative w-full max-w-[430px] aspect-[9/16] md:rounded-[40px] bg-black shadow-2xl overflow-hidden flex flex-col z-10"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Media Element */}
-              <div className="absolute inset-0 z-0 bg-slate-900 flex items-center justify-center">
-                <img
-                  src={activeArchivedStory.mediaUrl}
-                  alt="Archived story content"
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover"
-                />
-              </div>
-
-              {/* Progress bar & Header */}
-              <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/85 via-black/45 to-transparent z-10 space-y-3.5">
-                {/* Single Progress Bar */}
-                <div className="h-1 bg-stone-950/60/30 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-stone-950/60 transition-all duration-[40ms] ease-linear"
-                    style={{ width: `${archivedStoryProgress}%` }}
-                  />
-                </div>
-
-                {/* Header Information */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <img
-                      src={user.avatar}
-                      alt={user.name}
-                      referrerPolicy="no-referrer"
-                      className="w-9 h-9 rounded-full object-cover border border-stone-900/20 shadow-md"
-                    />
-                    <div className="text-left">
-                      <span className="font-bold text-xs text-white block leading-tight">
-                        {user.username}
-                      </span>
-                      <span className="text-[9px] text-slate-300 font-bold flex items-center gap-1">
-                        <Clock className="w-2.5 h-2.5" /> Archived &bull; {new Date(activeArchivedStory.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        if (window.confirm("Delete this story from your Archive? This will also remove it from any Highlights.")) {
-                          if (onDeleteStory) {
-                            onDeleteStory(activeArchivedStory.id);
-                            setActiveArchivedStory(null);
-                          }
-                        }
-                      }}
-                      className="p-1.5 bg-black/45 hover:bg-black/60 rounded-full text-rose-400 hover:text-rose-500 transition-colors cursor-pointer"
-                      title="Delete Story"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => setActiveArchivedStory(null)}
-                      className="p-1.5 bg-black/45 hover:bg-black/60 rounded-full text-white/95 transition-colors cursor-pointer"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Footer highlighting menu */}
-              <div className="absolute bottom-4 inset-x-0 flex justify-center z-10 px-4">
-                <button
-                  onClick={() => setShowAddToHighlightDropdown(!showAddToHighlightDropdown)}
-                  className="flex items-center gap-1.5 bg-stone-950/60/15 hover:bg-stone-950/60/25 active:scale-95 border border-stone-900/10 text-white font-bold text-xs px-5 py-2.5 rounded-full backdrop-blur transition-all cursor-pointer shadow-lg"
-                >
-                  <FolderHeart className="w-4 h-4 text-purple-400" />
-                  <span>Add to Highlight</span>
-                </button>
-              </div>
-
-              {/* Add to Highlight dropdown panel */}
-              {showAddToHighlightDropdown && (
-                <div className="absolute bottom-16 left-4 right-4 bg-slate-900/95 border border-slate-800 backdrop-blur-md rounded-2xl p-4 z-20 space-y-3">
-                  <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-                    <span className="text-white text-xs font-bold">Add to Highlight</span>
-                    <button onClick={() => setShowAddToHighlightDropdown(false)} className="text-stone-500 hover:text-white">
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                  <div className="max-h-36 overflow-y-auto space-y-1.5 text-left">
-                    {userHighlights.map((hl) => (
-                      <button
-                        key={hl.id}
-                        onClick={() => {
-                          if (onUpdateHighlight) {
-                            if (!hl.storyIds.includes(activeArchivedStory.id)) {
-                              onUpdateHighlight({
-                                ...hl,
-                                storyIds: [...hl.storyIds, activeArchivedStory.id]
-                              });
-                            } else {
-                              onUpdateHighlight({
-                                ...hl,
-                                storyIds: hl.storyIds.filter(id => id !== activeArchivedStory.id)
-                              });
-                            }
-                          }
-                        }}
-                        className="w-full text-left py-2 px-3 text-xs text-slate-200 hover:bg-stone-950/60/10 rounded-xl transition-colors cursor-pointer flex justify-between items-center"
-                      >
-                        <span>{hl.title}</span>
-                        {hl.storyIds.includes(activeArchivedStory.id) && (
-                          <Check className="w-3.5 h-3.5 text-purple-400" />
-                        )}
-                      </button>
-                    ))}
-
-                    <button
-                      onClick={() => {
-                        setShowAddToHighlightDropdown(false);
-                        setActiveArchivedStory(null);
-                        setIsCreatingHighlight(true);
-                        setNewHighlightTitle('');
-                        setSelectedStoryIds([activeArchivedStory.id]);
-                      }}
-                      className="w-full text-left py-2 px-3 text-xs text-purple-400 hover:bg-stone-950/60/10 rounded-xl transition-colors cursor-pointer font-bold flex items-center gap-1.5 border-t border-slate-800/50 mt-1 pt-2"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>New Highlight...</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       {/* Share Profile Toast notification */}
       {shareSuccess && (

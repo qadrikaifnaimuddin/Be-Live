@@ -144,42 +144,45 @@ const renderFormattedText = (text: string, searchQuery?: string) => {
 // ─────────────────────────────────────────────
 // Supabase row mappers
 // ─────────────────────────────────────────────
-const dbRowToMessage = (row: any): Message & { roomId?: string } => ({
-  id: row.id,
-  senderId: row.sender_id,
-  receiverId: row.receiver_id || row.room_id,
-  roomId: row.room_id,
-  senderName: row.profiles?.name,
-  senderAvatar: row.profiles?.avatar,
-  text: row.text,
-  mediaUrl: row.media_url,
-  mediaType: row.media_type,
-  isE2EE: row.is_e2ee,
-  snapViewed: row.snap_viewed,
-  isDisappearing: row.is_disappearing,
-  disappearDuration: row.disappear_duration,
-  disappeared: row.disappeared,
-  replyToId: row.reply_to_id,
-  replyToText: row.reply_to_text,
-  replyToSenderName: row.reply_to_sender_name,
-  reactions: row.reactions || {},
-  isPinned: row.is_pinned,
-  isForwarded: row.is_forwarded,
-  isRead: row.is_read,
-  isDelivered: row.is_delivered,
-  deliveredAt: row.delivered_at,
-  readAt: row.read_at,
-  deletedBy: row.deleted_by || [],
-  pollQuestion: row.poll_question,
-  pollOptions: row.poll_options,
-  pollVotes: row.poll_votes || {},
-  isSticker: row.is_sticker,
-  isDoodle: row.is_doodle,
-  doodleBg: row.doodle_bg,
-  liveLocationDuration: row.live_location_duration,
-  liveLocationStatus: row.live_location_status,
-  createdAt: row.created_at,
-});
+const dbRowToMessage = (row: any): Message & { roomId?: string } => {
+  const isSenderDeleted = !row.profiles && row.sender_id !== undefined;
+  return {
+    id: row.id,
+    senderId: row.sender_id,
+    receiverId: row.receiver_id || row.room_id,
+    roomId: row.room_id,
+    senderName: isSenderDeleted ? 'User deleted account' : (row.profiles?.name || row.profiles?.username || 'User'),
+    senderAvatar: isSenderDeleted ? 'https://api.dicebear.com/7.x/initials/svg?seed=Deleted+User' : (row.profiles?.avatar || ''),
+    text: isSenderDeleted ? 'User deleted account' : row.text,
+    mediaUrl: isSenderDeleted ? undefined : row.media_url,
+    mediaType: isSenderDeleted ? undefined : row.media_type,
+    isE2EE: row.is_e2ee,
+    snapViewed: row.snap_viewed,
+    isDisappearing: row.is_disappearing,
+    disappearDuration: row.disappear_duration,
+    disappeared: row.disappeared,
+    replyToId: row.reply_to_id,
+    replyToText: row.reply_to_text,
+    replyToSenderName: row.reply_to_sender_name,
+    reactions: row.reactions || {},
+    isPinned: row.is_pinned,
+    isForwarded: row.is_forwarded,
+    isRead: row.is_read,
+    isDelivered: row.is_delivered,
+    deliveredAt: row.delivered_at,
+    readAt: row.read_at,
+    deletedBy: row.deleted_by || [],
+    pollQuestion: isSenderDeleted ? undefined : row.poll_question,
+    pollOptions: isSenderDeleted ? undefined : row.poll_options,
+    pollVotes: isSenderDeleted ? {} : (row.poll_votes || {}),
+    isSticker: isSenderDeleted ? false : row.is_sticker,
+    isDoodle: isSenderDeleted ? false : row.is_doodle,
+    doodleBg: row.doodle_bg,
+    liveLocationDuration: row.live_location_duration,
+    liveLocationStatus: row.live_location_status,
+    createdAt: row.created_at,
+  };
+};
 
 const dbRowToRoom = (row: any): ChatRoom => ({
   id: row.id,
@@ -390,6 +393,11 @@ export default function MessagesScreen({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const realtimeChannelRef = useRef<any>(null);
   const typingTimerRef = useRef<any>(null);
+  const messagesRef = useRef<Message[]>(messages);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const STICKERS = ['😂', '😍', '🔥', '💀', '🥵', '😭', '🤯', '🎉', '💯', '❤️', '🚀', '✨', '🎯', '👀', '🫡', '🥶', '😤', '🤩', '🫶', '💪'];
 
@@ -634,6 +642,13 @@ export default function MessagesScreen({
                 r.avatar = prof.avatar || `https://api.dicebear.com/7.x/adventurer/svg?seed=${prof.username}`;
                 r.description = `@${prof.username}`;
                 r.lastSeen = prof.last_seen;
+              } else {
+                r.name = 'User deleted account';
+                r.avatar = 'https://api.dicebear.com/7.x/initials/svg?seed=Deleted+User';
+                r.description = 'Deleted Account';
+                if (r.lastMessage) {
+                  r.lastMessage = 'User deleted account';
+                }
               }
             }
           });
@@ -956,6 +971,13 @@ export default function MessagesScreen({
   }, [selectedChat, currentUser.id, currentUser.username, playChatSound]);
 
   // ─────────────────────────────────────────────
+  // Active chat notify parent layout
+  // ─────────────────────────────────────────────
+  useEffect(() => {
+    onActiveChatChange?.(!!selectedChat);
+  }, [selectedChat, onActiveChatChange]);
+
+  // ─────────────────────────────────────────────
   // Auto-scroll
   // ─────────────────────────────────────────────
   useEffect(() => {
@@ -970,7 +992,7 @@ export default function MessagesScreen({
 
     const markAsRead = () => {
       if (!document.hasFocus()) return;
-      const unread = messages.filter(m => m.senderId !== currentUser.id && !m.isRead);
+      const unread = messagesRef.current.filter(m => m.senderId !== currentUser.id && !m.isRead);
       if (unread.length === 0) return;
       const ids = unread.map(m => m.id);
       const now = new Date().toISOString();
@@ -1003,7 +1025,7 @@ export default function MessagesScreen({
     return () => {
       window.removeEventListener('focus', markAsRead);
     };
-  }, [selectedChat, messages, currentUser.id]);
+  }, [selectedChat, currentUser.id]);
 
   const formatLastSeen = (isoString: string) => {
     try {

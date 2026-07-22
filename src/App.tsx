@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, useNavigate } from 'react-router-dom';
-import LoginScreen from './components/LoginScreen';
+import LoginScreen from './components/auth/LoginScreen';
 import ProfileScreen from './components/ProfileScreen';
 import MessagesScreen from './components/MessagesScreen';
 import NotificationsPanel from './components/NotificationsPanel';
@@ -347,6 +347,8 @@ export default function App() {
     if (!currentUser) return;
     if (isSupabaseConfigured && supabase) {
       try {
+        await supabase.from('stories').delete().eq('user_id', currentUser.id);
+        await supabase.from('highlights').delete().eq('user_id', currentUser.id);
         await supabase.from('profiles').delete().eq('id', currentUser.id);
         await supabase.auth.signOut();
       } catch (err) {
@@ -357,6 +359,7 @@ export default function App() {
     localStorage.removeItem('be_live_current_user');
     localStorage.removeItem('google_signup_session');
     setGoogleSignupSession(null);
+    setActiveTab('profile');
   };
 
   // ProfileScreen Handlers
@@ -679,7 +682,6 @@ export default function App() {
               <ProfileScreen
                 user={currentUser}
                 currentUser={currentUser}
-                posts={[]}
                 stories={stories}
                 highlights={highlights}
                 onAddHighlight={handleAddHighlight}
