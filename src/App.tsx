@@ -840,7 +840,7 @@ export default function App() {
           isOpen={activeTab === 'live_stream'}
           onClose={() => setActiveTab('profile')}
           currentUser={currentUser}
-          mode="broadcast"
+          mode="browse"
           onViewProfile={handleViewProfile}
           onToggleFollow={(userId, isPrivate) => followSystem.follow(userId, !!isPrivate)}
         />

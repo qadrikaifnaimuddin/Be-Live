@@ -27,16 +27,39 @@ import {
   ShieldCheck,
   Award,
   Clock,
-  MessageSquare
+  Plus,
+  Play,
+  ArrowLeft
 } from 'lucide-react';
 import { User } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
+
+export interface ActiveLiveStream {
+  id: string;
+  host_id: string;
+  title: string;
+  stream_type: 'video' | 'audio';
+  status: 'live' | 'ended';
+  viewer_count: number;
+  peak_viewers: number;
+  total_hearts: number;
+  created_at: string;
+  hostProfile?: {
+    id: string;
+    username: string;
+    name: string;
+    avatar: string;
+    is_anonymous_mode?: boolean;
+    anon_username?: string;
+    anon_emoji?: string;
+  };
+}
 
 interface LiveStreamModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentUser: User;
-  mode: 'broadcast' | 'view';
+  mode?: 'broadcast' | 'view' | 'browse';
   activeStreamId?: string;
   initialHost?: User;
   initialTitle?: string;
@@ -75,7 +98,7 @@ export default function LiveStreamModal({
   isOpen,
   onClose,
   currentUser,
-  mode,
+  mode = 'browse',
   activeStreamId,
   initialHost,
   initialTitle,
@@ -83,8 +106,16 @@ export default function LiveStreamModal({
   onViewProfile,
   onToggleFollow
 }: LiveStreamModalProps) {
+  // Discovery & Active Streams State
+  const [activeStep, setActiveStep] = useState<'discovery' | 'config' | 'live' | 'summary'>('discovery');
+  const [activeStreams, setActiveStreams] = useState<ActiveLiveStream[]>([]);
+  const [loadingStreams, setLoadingStreams] = useState(false);
+
+  // Stream View Mode ('broadcast' when we host, 'view' when watching someone, 'browse' when discovering)
+  const [streamMode, setStreamMode] = useState<'broadcast' | 'view' | 'browse'>('browse');
+  const [selectedHostUser, setSelectedHostUser] = useState<User | null>(initialHost || null);
+
   // Broadcasting Setup States
-  const [setupStep, setSetupStep] = useState<'config' | 'live'>('config');
   const [streamTitle, setStreamTitle] = useState('');
   const [liveType, setLiveType] = useState<'video' | 'audio'>(streamType);
   
@@ -121,25 +152,81 @@ export default function LiveStreamModal({
   const signalChannelRef = useRef<any>(null);
 
   // End Summary Screen State
-  const [showSummary, setShowSummary] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
 
-  // Host Info
-  const hostUser = mode === 'broadcast' ? currentUser : (initialHost || currentUser);
-  const isHostAnon = !!hostUser.isAnonymousMode;
-  const hostNameVal = isHostAnon ? (hostUser.anonUsername || 'Anonymous Host') : hostUser.name;
-  const hostUsernameVal = isHostAnon ? (hostUser.anonUsername || 'Anonymous') : hostUser.username;
-  const hostAvatarVal = isHostAnon ? (hostUser.anonEmoji || '🕵️‍♂️') : hostUser.avatar;
+  // Fetch all active live streams from Supabase
+  const fetchActiveStreams = async () => {
+    if (!isSupabaseConfigured || !supabase) return;
+    setLoadingStreams(true);
+    try {
+      const { data: streams, error } = await supabase
+        .from('live_streams')
+        .select(`
+          *,
+          hostProfile:profiles!live_streams_host_id_fkey(id, username, name, avatar, is_anonymous_mode, anon_username, anon_emoji)
+        `)
+        .eq('status', 'live')
+        .order('created_at', { ascending: false });
 
-  const displayTitle = mode === 'broadcast' 
-    ? (streamTitle.trim() || 'My Live Session 🌟') 
-    : (initialTitle || 'Live Session 🌟');
+      if (error) {
+        console.warn("[LiveStream Discovery Error]:", error);
+      } else if (streams) {
+        setActiveStreams(streams as any[]);
+      }
+    } catch (e) {
+      console.warn("Failed to load active streams:", e);
+    } finally {
+      setLoadingStreams(false);
+    }
+  };
+
+  // Realtime subscription for active streams discovery
+  useEffect(() => {
+    if (!isOpen) return;
+
+    fetchActiveStreams();
+
+    if (isSupabaseConfigured && supabase) {
+      const discoveryCh = supabase
+        .channel('live-streams-discovery-channel')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'live_streams' },
+          () => {
+            fetchActiveStreams();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(discoveryCh);
+      };
+    }
+  }, [isOpen]);
 
   // Reset modal state on open
   useEffect(() => {
     if (isOpen) {
-      setSetupStep(mode === 'broadcast' ? 'config' : 'live');
-      setIsLive(mode === 'view');
+      if (activeStreamId && initialHost) {
+        // Direct View Mode
+        setStreamMode('view');
+        setSelectedHostUser(initialHost);
+        setCurrentStreamId(activeStreamId);
+        setStreamTitle(initialTitle || 'Live Stream 🌟');
+        setLiveType(streamType);
+        setActiveStep('live');
+        setIsLive(true);
+        initializeWebRTC(activeStreamId, 'view');
+      } else if (mode === 'broadcast') {
+        setStreamMode('broadcast');
+        setActiveStep('config');
+        setIsLive(false);
+      } else {
+        setStreamMode('browse');
+        setActiveStep('discovery');
+        setIsLive(false);
+      }
+
       setLiveDuration(0);
       setViewerCount(1);
       setPeakViewers(1);
@@ -150,9 +237,7 @@ export default function LiveStreamModal({
           senderId: 'system',
           username: 'System',
           avatar: '',
-          text: mode === 'broadcast' 
-            ? 'Configure your live stream settings and click Go Live!' 
-            : `Joined ${hostNameVal}'s live stream ✨`,
+          text: 'Welcome to Be-Live Streaming System! 🌟',
           isSystem: true
         }
       ]);
@@ -161,8 +246,6 @@ export default function LiveStreamModal({
       setMicOn(true);
       setCameraOn(true);
       setSpeakerOn(true);
-      setShowSummary(false);
-      setCurrentStreamId(activeStreamId || null);
     } else {
       cleanUpStream();
     }
@@ -191,7 +274,7 @@ export default function LiveStreamModal({
 
   // Local camera media initialization when broadcasting
   useEffect(() => {
-    if (isOpen && mode === 'broadcast' && liveType === 'video' && cameraOn) {
+    if (isOpen && streamMode === 'broadcast' && (activeStep === 'config' || activeStep === 'live') && liveType === 'video' && cameraOn) {
       navigator.mediaDevices.getUserMedia({
         video: { facingMode: cameraFacing },
         audio: {
@@ -230,10 +313,8 @@ export default function LiveStreamModal({
       });
     }
 
-    return () => {
-      // Do not destroy stream on facing toggle unless unmounting
-    };
-  }, [isOpen, mode, liveType, cameraFacing]);
+    return () => {};
+  }, [isOpen, streamMode, activeStep, liveType, cameraFacing]);
 
   // Synchronize video refs
   useEffect(() => {
@@ -252,12 +333,12 @@ export default function LiveStreamModal({
 
   // Live Timer Clock
   useEffect(() => {
-    if (!isLive || showSummary) return;
+    if (!isLive || activeStep !== 'live') return;
     const timer = setInterval(() => {
       setLiveDuration(prev => prev + 1);
     }, 1000);
     return () => clearInterval(timer);
-  }, [isLive, showSummary]);
+  }, [isLive, activeStep]);
 
   // Scroll chat to bottom
   useEffect(() => {
@@ -276,14 +357,14 @@ export default function LiveStreamModal({
   };
 
   // Setup WebRTC Broadcast/Viewer Connection
-  const initializeWebRTC = (streamId: string) => {
+  const initializeWebRTC = (streamId: string, currentRole: 'broadcast' | 'view' = streamMode === 'view' ? 'view' : 'broadcast') => {
     if (!isSupabaseConfigured || !supabase) return;
 
     const pc = new RTCPeerConnection(ICE_CONFIG);
     peerConnectionRef.current = pc;
 
     // Attach local stream if broadcaster
-    if (mode === 'broadcast') {
+    if (currentRole === 'broadcast') {
       const activeStream = localStreamRef.current || localStream;
       if (activeStream) {
         activeStream.getTracks().forEach(track => {
@@ -322,7 +403,7 @@ export default function LiveStreamModal({
 
     signalCh
       .on('broadcast', { event: 'offer' }, async ({ payload }) => {
-        if (payload.from !== currentUser.id && mode === 'view') {
+        if (payload.from !== currentUser.id && currentRole === 'view') {
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
@@ -335,7 +416,7 @@ export default function LiveStreamModal({
         }
       })
       .on('broadcast', { event: 'answer' }, async ({ payload }) => {
-        if (payload.from !== currentUser.id && mode === 'broadcast') {
+        if (payload.from !== currentUser.id && currentRole === 'broadcast') {
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
         }
       })
@@ -356,7 +437,7 @@ export default function LiveStreamModal({
         spawnFloatingHeart(payload.emoji);
       })
       .on('broadcast', { event: 'end-stream' }, () => {
-        if (mode === 'view') {
+        if (currentRole === 'view') {
           setMessages(prev => [
             ...prev,
             {
@@ -369,11 +450,11 @@ export default function LiveStreamModal({
             }
           ]);
           setIsLive(false);
-          setShowSummary(true);
+          setActiveStep('summary');
         }
       })
       .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED' && mode === 'broadcast') {
+        if (status === 'SUBSCRIBED' && currentRole === 'broadcast') {
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
           signalCh.send({
@@ -383,6 +464,60 @@ export default function LiveStreamModal({
           });
         }
       });
+  };
+
+  // Join Existing Active Live Stream as Viewer
+  const handleJoinStream = async (stream: ActiveLiveStream) => {
+    if (!isSupabaseConfigured || !supabase) return;
+
+    await cleanUpStream();
+
+    const hostProfile = stream.hostProfile;
+    const isAnon = !!hostProfile?.is_anonymous_mode;
+    const hostUserObj: User = {
+      id: stream.host_id,
+      username: isAnon ? (hostProfile?.anon_username || 'anonymous') : (hostProfile?.username || 'user'),
+      name: isAnon ? (hostProfile?.anon_username || 'Anonymous Host') : (hostProfile?.name || 'Live Host'),
+      avatar: isAnon ? (hostProfile?.anon_emoji || '🕵️‍♂️') : (hostProfile?.avatar || ''),
+      bio: '',
+      email: '',
+      followers: [],
+      following: [],
+      isAnonymousMode: isAnon
+    };
+
+    setSelectedHostUser(hostUserObj);
+    setStreamMode('view');
+    setCurrentStreamId(stream.id);
+    setStreamTitle(stream.title);
+    setLiveType(stream.stream_type);
+    setViewerCount(stream.viewer_count + 1);
+    setTotalHearts(stream.total_hearts || 0);
+    setIsLive(true);
+    setActiveStep('live');
+
+    setMessages([
+      {
+        id: 'sys_joined',
+        senderId: 'system',
+        username: 'System',
+        avatar: '',
+        text: `Joined ${hostUserObj.name}'s live stream ✨`,
+        isSystem: true
+      }
+    ]);
+
+    // Increment viewer count in DB
+    try {
+      await supabase
+        .from('live_streams')
+        .update({ viewer_count: stream.viewer_count + 1 })
+        .eq('id', stream.id);
+    } catch (e) {
+      console.warn("Could not increment viewer count:", e);
+    }
+
+    initializeWebRTC(stream.id, 'view');
   };
 
   // Broadcaster starts live session
@@ -408,39 +543,50 @@ export default function LiveStreamModal({
 
       const streamId = data.id;
       setCurrentStreamId(streamId);
-      setSetupStep('live');
+      setStreamMode('broadcast');
+      setActiveStep('live');
       setIsLive(true);
-      initializeWebRTC(streamId);
+      initializeWebRTC(streamId, 'broadcast');
     } catch (err: any) {
       console.error("[LiveStream Start Error]:", err);
       alert("Could not start live stream: " + err.message);
     }
   };
 
-  // End live broadcast
+  // End live broadcast or leave viewing stream
   const handleEndBroadcast = async () => {
-    if (currentStreamId && isSupabaseConfigured && supabase && mode === 'broadcast') {
-      await supabase
-        .from('live_streams')
-        .update({
-          status: 'ended',
-          ended_at: new Date().toISOString(),
-          peak_viewers: peakViewers,
-          total_hearts: totalHearts
-        })
-        .eq('id', currentStreamId);
+    if (currentStreamId && isSupabaseConfigured && supabase) {
+      if (streamMode === 'broadcast') {
+        await supabase
+          .from('live_streams')
+          .update({
+            status: 'ended',
+            ended_at: new Date().toISOString(),
+            peak_viewers: peakViewers,
+            total_hearts: totalHearts
+          })
+          .eq('id', currentStreamId);
 
-      if (signalChannelRef.current) {
-        signalChannelRef.current.send({
-          type: 'broadcast',
-          event: 'end-stream',
-          payload: {}
-        });
+        if (signalChannelRef.current) {
+          signalChannelRef.current.send({
+            type: 'broadcast',
+            event: 'end-stream',
+            payload: {}
+          });
+        }
+      } else {
+        // Decrement viewer count in DB
+        try {
+          await supabase
+            .from('live_streams')
+            .update({ viewer_count: Math.max(0, viewerCount - 1) })
+            .eq('id', currentStreamId);
+        } catch (e) {}
       }
     }
 
     setIsLive(false);
-    setShowSummary(true);
+    setActiveStep('summary');
     cleanUpStream();
   };
 
@@ -554,7 +700,7 @@ export default function LiveStreamModal({
   // Spawn floating heart particle
   const spawnFloatingHeart = (emoji: string) => {
     const id = `heart_${Date.now()}_${Math.random()}`;
-    const x = Math.floor(Math.random() * 60) + 20; // 20% to 80% horizontal position
+    const x = Math.floor(Math.random() * 60) + 20;
     setFloatingHearts(prev => [...prev.slice(-15), { id, emoji, x }]);
     setTimeout(() => {
       setFloatingHearts(prev => prev.filter(h => h.id !== id));
@@ -567,6 +713,17 @@ export default function LiveStreamModal({
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
   };
+
+  // Active Host Details
+  const activeHost = streamMode === 'broadcast' ? currentUser : (selectedHostUser || currentUser);
+  const isHostAnon = !!activeHost.isAnonymousMode;
+  const hostNameVal = isHostAnon ? (activeHost.anonUsername || 'Anonymous Host') : activeHost.name;
+  const hostUsernameVal = isHostAnon ? (activeHost.anonUsername || 'Anonymous') : activeHost.username;
+  const hostAvatarVal = isHostAnon ? (activeHost.anonEmoji || '🕵️‍♂️') : activeHost.avatar;
+
+  const displayTitle = streamMode === 'broadcast' 
+    ? (streamTitle.trim() || 'My Live Session 🌟') 
+    : (streamTitle || initialTitle || 'Live Session 🌟');
 
   if (!isOpen) return null;
 
@@ -590,26 +747,47 @@ export default function LiveStreamModal({
           {/* Header Bar */}
           <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-stone-850 bg-stone-900/60 shrink-0 z-20">
             <div className="flex items-center gap-3">
+              {activeStep !== 'discovery' && (
+                <button
+                  onClick={() => {
+                    if (isLive && streamMode === 'broadcast') {
+                      if (confirm("End your broadcast and return to discovery?")) handleEndBroadcast();
+                    } else {
+                      cleanUpStream();
+                      setActiveStep('discovery');
+                    }
+                  }}
+                  className="p-1.5 bg-stone-950 hover:bg-stone-800 border border-stone-850 text-neutral-400 hover:text-white rounded-xl transition-colors cursor-pointer"
+                  title="Back to Discovery"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                </button>
+              )}
+
               <div className="p-2 bg-rose-500/10 border border-rose-500/20 text-rose-500 rounded-2xl">
                 <Radio className="w-5 h-5 animate-pulse text-rose-500" />
               </div>
               <div className="text-left">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-black text-white uppercase tracking-wider">{displayTitle}</h3>
-                  {isLive && (
+                  <h3 className="text-sm font-black text-white uppercase tracking-wider">
+                    {activeStep === 'discovery' ? 'Live Stream Hub' : displayTitle}
+                  </h3>
+                  {isLive && activeStep === 'live' && (
                     <span className="px-2 py-0.5 bg-rose-600 text-white text-[9px] font-black uppercase tracking-widest rounded-full animate-pulse">
                       LIVE
                     </span>
                   )}
                 </div>
                 <p className="text-[10px] text-neutral-400 font-medium">
-                  {mode === 'broadcast' ? 'You are broadcasting' : `Hosted by @${hostUsernameVal}`}
+                  {activeStep === 'discovery' 
+                    ? 'Watch ongoing broadcasts or go live real-time' 
+                    : (streamMode === 'broadcast' ? 'You are broadcasting' : `Hosted by @${hostUsernameVal}`)}
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              {isLive && (
+              {isLive && activeStep === 'live' && (
                 <>
                   <div className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-stone-950 border border-stone-800 rounded-xl text-xs font-bold text-neutral-300">
                     <Clock className="w-3.5 h-3.5 text-rose-500" />
@@ -622,9 +800,22 @@ export default function LiveStreamModal({
                 </>
               )}
 
+              {activeStep === 'discovery' && (
+                <button
+                  onClick={() => {
+                    setStreamMode('broadcast');
+                    setActiveStep('config');
+                  }}
+                  className="px-3 py-1.5 bg-gradient-to-r from-rose-500 to-purple-600 hover:from-rose-600 hover:to-purple-700 text-white font-extrabold text-xs rounded-xl uppercase tracking-wider cursor-pointer flex items-center gap-1.5 shadow-md"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Go Live</span>
+                </button>
+              )}
+
               <button 
                 onClick={() => {
-                  if (isLive && mode === 'broadcast') {
+                  if (isLive && streamMode === 'broadcast') {
                     if (confirm("End your live broadcast?")) handleEndBroadcast();
                   } else {
                     onClose();
@@ -637,11 +828,187 @@ export default function LiveStreamModal({
             </div>
           </div>
 
-          {/* Main Body */}
-          <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+          {/* Main Body Content */}
+          <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative bg-stone-950/40">
 
-            {/* Config Step (Broadcaster Setup) */}
-            {mode === 'broadcast' && setupStep === 'config' && !showSummary && (
+            {/* 1. DISCOVERY HUB (Browse Ongoing Active Live Streams) */}
+            {activeStep === 'discovery' && (
+              <div className="flex-1 p-4 sm:p-6 flex flex-col overflow-y-auto space-y-6">
+                
+                {/* Banner Header */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between bg-gradient-to-r from-rose-950/40 via-purple-950/30 to-stone-900 border border-rose-500/20 p-5 rounded-3xl gap-4">
+                  <div className="space-y-1 text-left">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping inline-block"></span>
+                      <span className="text-xs font-black text-rose-400 uppercase tracking-widest">REALTIME STREAMING</span>
+                    </div>
+                    <h2 className="text-lg sm:text-xl font-extrabold text-white">Active Live Stream Hub</h2>
+                    <p className="text-xs text-neutral-400">Join any active user's stream below or start your own broadcast!</p>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setStreamMode('broadcast');
+                      setActiveStep('config');
+                    }}
+                    className="w-full sm:w-auto px-5 py-3 bg-gradient-to-r from-rose-500 to-purple-600 hover:from-rose-600 hover:to-purple-700 text-white font-extrabold text-xs uppercase tracking-widest rounded-2xl cursor-pointer flex items-center justify-center gap-2 shadow-xl active:scale-98 transition-all"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Start My Broadcast</span>
+                  </button>
+                </div>
+
+                {/* Direct Join by Stream ID / Room Code Box */}
+                <div className="bg-stone-900 border border-stone-850 p-4 rounded-3xl flex flex-col sm:flex-row items-center gap-3">
+                  <div className="flex-1 text-left w-full">
+                    <label className="text-[10px] font-black text-rose-400 uppercase tracking-widest block mb-1">
+                      Direct Join by Stream ID / Link
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Paste Stream ID or Code..."
+                      value={inputText}
+                      onChange={(e) => setInputText(e.target.value)}
+                      className="w-full px-3.5 py-2 bg-stone-950 border border-stone-800 rounded-xl text-xs text-white placeholder-neutral-500 outline-none focus:border-rose-500 transition-colors"
+                    />
+                  </div>
+                  <button
+                    onClick={() => {
+                      const clean = inputText.trim();
+                      if (!clean) return;
+                      handleJoinStream({
+                        id: clean,
+                        host_id: 'unknown',
+                        title: 'Live Stream Session 🌟',
+                        stream_type: 'video',
+                        status: 'live',
+                        viewer_count: 1,
+                        peak_viewers: 1,
+                        total_hearts: 0,
+                        created_at: new Date().toISOString()
+                      });
+                      setInputText('');
+                    }}
+                    disabled={!inputText.trim()}
+                    className={`w-full sm:w-auto px-5 py-2.5 rounded-xl font-extrabold text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all self-end ${
+                      inputText.trim() 
+                        ? 'bg-indigo-600 hover:bg-indigo-500 text-white cursor-pointer shadow-lg' 
+                        : 'bg-stone-950 text-neutral-600 cursor-not-allowed border border-stone-850'
+                    }`}
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <span>Join Room</span>
+                  </button>
+                </div>
+
+                {/* Stream Grid */}
+                <div className="space-y-4 text-left">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-black uppercase tracking-wider text-neutral-300">
+                      Ongoing Live Sessions ({activeStreams.length})
+                    </h3>
+                    <button 
+                      onClick={fetchActiveStreams} 
+                      className="text-[11px] font-bold text-rose-400 hover:underline cursor-pointer"
+                    >
+                      Refresh
+                    </button>
+                  </div>
+
+                  {loadingStreams && activeStreams.length === 0 ? (
+                    <div className="p-12 text-center text-neutral-500 space-y-2">
+                      <Radio className="w-8 h-8 mx-auto animate-pulse text-rose-500" />
+                      <p className="text-xs font-bold uppercase tracking-wider">Discovering active streams...</p>
+                    </div>
+                  ) : activeStreams.length === 0 ? (
+                    <div className="bg-stone-900/60 border border-stone-850 p-10 rounded-3xl text-center space-y-4">
+                      <div className="w-14 h-14 rounded-full bg-stone-950 border border-stone-850 flex items-center justify-center mx-auto text-neutral-500">
+                        <Radio className="w-6 h-6 text-neutral-600" />
+                      </div>
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-bold text-white">No active live streams right now</h4>
+                        <p className="text-xs text-neutral-400">Be the first to go live and share your stream with everyone!</p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setStreamMode('broadcast');
+                          setActiveStep('config');
+                        }}
+                        className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs rounded-xl uppercase tracking-wider cursor-pointer inline-flex items-center gap-2"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Go Live Now
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {activeStreams.map(stream => {
+                        const host = stream.hostProfile;
+                        const isAnon = !!host?.is_anonymous_mode;
+                        const name = isAnon ? (host?.anon_username || 'Anonymous') : (host?.name || 'Host');
+                        const avatar = isAnon ? (host?.anon_emoji || '🕵️‍♂️') : (host?.avatar || '');
+
+                        return (
+                          <div 
+                            key={stream.id}
+                            className="bg-stone-900 border border-stone-850 hover:border-rose-500/50 p-4.5 rounded-3xl space-y-4 flex flex-col justify-between transition-all group shadow-md"
+                          >
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2.5">
+                                  {isAnon ? (
+                                    <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-lg shadow">
+                                      {avatar}
+                                    </div>
+                                  ) : (
+                                    <img src={avatar || ''} className="w-9 h-9 rounded-full object-cover border border-stone-700" />
+                                  )}
+                                  <div className="text-left">
+                                    <h4 className="text-xs font-bold text-white truncate max-w-[120px]">{name}</h4>
+                                    <p className="text-[10px] text-neutral-500">@{host?.username || 'user'}</p>
+                                  </div>
+                                </div>
+
+                                <span className="px-2 py-0.5 bg-rose-600/20 border border-rose-500/30 text-rose-400 text-[9px] font-black uppercase tracking-widest rounded-full flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse"></span>
+                                  LIVE
+                                </span>
+                              </div>
+
+                              <div className="text-left space-y-1">
+                                <h3 className="text-xs font-black text-white group-hover:text-rose-400 transition-colors line-clamp-2">
+                                  {stream.title}
+                                </h3>
+                                <div className="flex items-center gap-3 text-[10px] text-neutral-400 font-medium">
+                                  <span className="flex items-center gap-1">
+                                    <Users className="w-3 h-3 text-indigo-400" />
+                                    {stream.viewer_count || 1} watching
+                                  </span>
+                                  <span className="uppercase tracking-wider px-1.5 py-0.5 bg-stone-950 border border-stone-800 rounded-md text-[9px]">
+                                    {stream.stream_type}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <button
+                              onClick={() => handleJoinStream(stream)}
+                              className="w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs rounded-2xl uppercase tracking-widest cursor-pointer flex items-center justify-center gap-2 transition-transform active:scale-95 shadow-md"
+                            >
+                              <Play className="w-3.5 h-3.5 fill-current" />
+                              Join Stream
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 2. CONFIG STEP (Broadcaster Setup) */}
+            {activeStep === 'config' && (
               <div className="flex-1 p-6 flex flex-col justify-between overflow-y-auto max-w-xl mx-auto space-y-6">
                 <div className="space-y-6 text-left w-full">
                   <div className="text-center space-y-2 pt-4">
@@ -711,20 +1078,26 @@ export default function LiveStreamModal({
                   </div>
                 </div>
 
-                <div className="pt-4 border-t border-stone-850 w-full">
+                <div className="pt-4 border-t border-stone-850 w-full flex gap-3">
+                  <button
+                    onClick={() => setActiveStep('discovery')}
+                    className="px-4 py-4 bg-stone-950 hover:bg-stone-800 text-neutral-400 font-bold text-xs rounded-2xl"
+                  >
+                    Cancel
+                  </button>
                   <button
                     onClick={handleStartBroadcast}
-                    className="w-full py-4 bg-gradient-to-r from-rose-500 via-purple-600 to-indigo-600 hover:from-rose-600 hover:to-indigo-700 text-white font-extrabold text-sm rounded-2xl uppercase tracking-widest active:scale-98 transition-transform cursor-pointer flex items-center justify-center gap-2 shadow-xl"
+                    className="flex-1 py-4 bg-gradient-to-r from-rose-500 via-purple-600 to-indigo-600 hover:from-rose-600 hover:to-indigo-700 text-white font-extrabold text-sm rounded-2xl uppercase tracking-widest active:scale-98 transition-transform cursor-pointer flex items-center justify-center gap-2 shadow-xl"
                   >
                     <Radio className="w-5 h-5" />
-                    Start Live Stream
+                    Start Broadcast
                   </button>
                 </div>
               </div>
             )}
 
-            {/* End Stream Performance Summary Screen */}
-            {showSummary && (
+            {/* 3. END STREAM SUMMARY SCREEN */}
+            {activeStep === 'summary' && (
               <div className="flex-1 p-6 flex flex-col justify-between overflow-y-auto max-w-xl mx-auto space-y-6">
                 <div className="space-y-6 text-center w-full pt-4">
                   <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-amber-500 to-rose-500 p-0.5 mx-auto shadow-xl flex items-center justify-center text-white">
@@ -758,34 +1131,34 @@ export default function LiveStreamModal({
 
                 <div className="pt-4 border-t border-stone-850 w-full space-y-3">
                   <button
-                    onClick={onClose}
+                    onClick={() => setActiveStep('discovery')}
                     className="w-full py-4 bg-stone-800 hover:bg-stone-700 text-white font-extrabold text-sm rounded-2xl uppercase tracking-widest active:scale-98 transition-transform cursor-pointer"
                   >
-                    Close Session
+                    Back to Stream Hub
                   </button>
                 </div>
               </div>
             )}
 
-            {/* Active Running Stream View */}
-            {((setupStep === 'live' && !showSummary) || (mode === 'view' && !showSummary)) && (
+            {/* 4. ACTIVE RUNNING STREAM VIEW (Video feed, chat, reactions) */}
+            {activeStep === 'live' && (
               <>
-                {/* Media Screen Panel (Left Column on Desktop, Top on Mobile) */}
+                {/* Media Screen Panel */}
                 <div className="flex-1 bg-stone-950 relative flex flex-col justify-center items-center overflow-hidden min-h-[220px] md:min-h-0">
                   
                   {/* Remote / Local Video Feeds */}
                   <video
-                    ref={mode === 'broadcast' ? localVideoRef : remoteVideoRef}
+                    ref={streamMode === 'broadcast' ? localVideoRef : remoteVideoRef}
                     autoPlay
                     playsInline
-                    muted={mode === 'broadcast'}
-                    className={`w-full h-full object-cover ${mode === 'broadcast' ? 'scale-x-[-1]' : ''} ${
-                      (mode === 'broadcast' && cameraOn && liveType === 'video') || (mode === 'view' && remoteStream) ? 'block' : 'hidden'
+                    muted={streamMode === 'broadcast'}
+                    className={`w-full h-full object-cover ${streamMode === 'broadcast' ? 'scale-x-[-1]' : ''} ${
+                      (streamMode === 'broadcast' && cameraOn && liveType === 'video') || (streamMode === 'view' && remoteStream) ? 'block' : 'hidden'
                     }`}
                   />
 
                   {/* Audio Mode or Camera Off Splash Screen */}
-                  {((mode === 'broadcast' && (!cameraOn || liveType === 'audio')) || (mode === 'view' && !remoteStream)) && (
+                  {((streamMode === 'broadcast' && (!cameraOn || liveType === 'audio')) || (streamMode === 'view' && !remoteStream)) && (
                     <div className="space-y-4 text-center p-6 z-10">
                       <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-rose-500 via-purple-600 to-indigo-600 p-1 mx-auto shadow-2xl animate-pulse">
                         {isHostAnon ? (
@@ -801,7 +1174,7 @@ export default function LiveStreamModal({
                       </div>
                       <div>
                         <h4 className="text-base font-extrabold text-white">@{hostUsernameVal}</h4>
-                        <p className="text-xs text-neutral-400">{liveType === 'audio' ? 'Audio Lounge Session' : 'Video Feed Off'}</p>
+                        <p className="text-xs text-neutral-400">{liveType === 'audio' ? 'Audio Lounge Session' : 'Connecting stream feed...'}</p>
                       </div>
                     </div>
                   )}
@@ -824,9 +1197,9 @@ export default function LiveStreamModal({
                     </AnimatePresence>
                   </div>
 
-                  {/* Media Controls Toolbar (Broadcaster & Viewer Controls) */}
+                  {/* Media Controls Toolbar */}
                   <div className="absolute bottom-4 right-4 bg-stone-950/80 backdrop-blur-md border border-stone-850 p-2 rounded-2xl flex items-center gap-2 z-30 shadow-xl">
-                    {mode === 'broadcast' && (
+                    {streamMode === 'broadcast' && (
                       <>
                         <button
                           onClick={toggleCamera}
@@ -868,7 +1241,7 @@ export default function LiveStreamModal({
                       </>
                     )}
 
-                    {mode === 'view' && (
+                    {streamMode === 'view' && (
                       <button
                         onClick={() => setSpeakerOn(!speakerOn)}
                         className={`p-2 rounded-xl transition-colors cursor-pointer ${
