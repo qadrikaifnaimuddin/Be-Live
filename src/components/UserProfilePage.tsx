@@ -190,17 +190,17 @@ export default function UserProfilePage({
 
             {/* Stats */}
             <div className="flex gap-5">
-              <div className="text-center cursor-pointer" onClick={() => setFollowersModal(null)}>
-                <p className="font-black text-stone-100 text-base leading-tight">{relativeNum(profile.postsCount)}</p>
-                <p className="text-xs text-stone-500">posts</p>
+              <div className="text-center cursor-pointer group" onClick={() => setFollowersModal(null)}>
+                <p className="font-black text-stone-100 text-base leading-tight group-hover:text-amber-400 transition-colors">{relativeNum(profile.postsCount)}</p>
+                <p className="text-xs text-stone-500 font-medium uppercase tracking-wider">posts</p>
               </div>
-              <div className="text-center cursor-pointer" onClick={() => setFollowersModal('followers')}>
-                <p className="font-black text-stone-100 text-base leading-tight">{relativeNum(profile.followersCount)}</p>
-                <p className="text-xs text-stone-500">followers</p>
+              <div className="text-center cursor-pointer group" onClick={() => setFollowersModal('followers')}>
+                <p className="font-black text-stone-100 text-base leading-tight group-hover:text-amber-400 transition-colors">{relativeNum(profile.followersCount)}</p>
+                <p className="text-xs font-black text-amber-400 uppercase tracking-wider">B-Liever</p>
               </div>
-              <div className="text-center cursor-pointer" onClick={() => setFollowersModal('following')}>
-                <p className="font-black text-stone-100 text-base leading-tight">{relativeNum(profile.followingCount)}</p>
-                <p className="text-xs text-stone-500">following</p>
+              <div className="text-center cursor-pointer group" onClick={() => setFollowersModal('following')}>
+                <p className="font-black text-stone-100 text-base leading-tight group-hover:text-amber-400 transition-colors">{relativeNum(profile.followingCount)}</p>
+                <p className="text-xs font-black text-amber-400 uppercase tracking-wider">B-Lieving</p>
               </div>
             </div>
           </div>
@@ -231,11 +231,11 @@ export default function UserProfilePage({
               {loadingFollow ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : following ? (
-                <><UserCheck className="w-4 h-4" />Following</>
+                <><UserCheck className="w-4 h-4" />B-Lieving</>
               ) : pending ? (
-                <><Clock className="w-4 h-4" />Requested</>
+                <><Clock className="w-4 h-4" />Requested B-Lieving</>
               ) : (
-                <><UserPlus className="w-4 h-4" />{profile.isPrivate ? 'Request' : 'Follow'}</>
+                <><UserPlus className="w-4 h-4" />{profile.isPrivate ? 'Request B-Lieving' : 'B-Lieve'}</>
               )}
             </button>
 

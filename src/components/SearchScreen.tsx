@@ -117,10 +117,10 @@ function UserRow({
 
   const followLabel = () => {
     if (loadingFollow) return <Loader2 className="w-3 h-3 animate-spin" />;
-    if (hasPendingRequest) return 'Requested';
-    if (isFollowing) return 'Following';
-    if (user.isPrivate) return 'Request';
-    return 'Follow';
+    if (hasPendingRequest) return 'Requested B-Lieving';
+    if (isFollowing) return 'B-Lieving';
+    if (user.isPrivate) return 'Request B-Lieving';
+    return 'B-Lieve';
   };
 
   const followStyle = () => {
@@ -131,12 +131,12 @@ function UserRow({
 
   return (
     <div
-      className="flex items-center gap-3 px-4 py-3 hover:bg-stone-900/50 transition-all cursor-pointer group"
+      className="flex items-center gap-3 px-4 py-3 hover:bg-stone-900/50 transition-all cursor-pointer group border-b border-stone-900/60 last:border-0"
       onClick={() => onViewProfile(user)}
     >
       {/* Avatar */}
       <div className="relative shrink-0">
-        <Avatar user={user} size={46} />
+        <Avatar user={user} size={44} />
         {user.isPrivate && (
           <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-stone-900 rounded-full flex items-center justify-center">
             <Lock className="w-2.5 h-2.5 text-stone-500" />
@@ -152,8 +152,8 @@ function UserRow({
         </div>
         <p className="text-xs text-stone-500 truncate">@{user.username}</p>
         {user.followersCount > 0 && (
-          <p className="text-xs text-stone-600 mt-0.5">
-            {relativeNum(user.followersCount)} followers
+          <p className="text-xs text-amber-400/90 font-black mt-0.5">
+            {relativeNum(user.followersCount)} B-Liever
           </p>
         )}
       </div>
@@ -252,12 +252,12 @@ function ProfileMiniSheet({
           <div className="flex gap-4 mb-5 px-1">
             <div className="text-center">
               <p className="text-base font-black text-stone-100">{relativeNum(user.followersCount)}</p>
-              <p className="text-xs text-stone-500">Followers</p>
+              <p className="text-xs font-black text-amber-400 uppercase tracking-wider">B-Liever</p>
             </div>
             <div className="w-px bg-stone-800" />
             <div className="text-center">
               <p className="text-base font-black text-stone-100">{relativeNum(user.followingCount)}</p>
-              <p className="text-xs text-stone-500">Following</p>
+              <p className="text-xs font-black text-amber-400 uppercase tracking-wider">B-Lieving</p>
             </div>
           </div>
 
@@ -278,11 +278,11 @@ function ProfileMiniSheet({
                 {loadingFollow ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : isFollowing ? (
-                  <><UserCheck className="w-4 h-4" />Following</>
+                  <><UserCheck className="w-4 h-4" />B-Lieving</>
                 ) : hasPendingRequest ? (
-                  <><Clock className="w-4 h-4" />Requested</>
+                  <><Clock className="w-4 h-4" />Requested B-Lieving</>
                 ) : (
-                  <><UserPlus className="w-4 h-4" />{user.isPrivate ? 'Request Follow' : 'Follow'}</>
+                  <><UserPlus className="w-4 h-4" />{user.isPrivate ? 'Request B-Lieving' : 'B-Lieve'}</>
                 )}
               </button>
 

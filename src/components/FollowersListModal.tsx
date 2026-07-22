@@ -125,7 +125,12 @@ export default function FollowersListModal({
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-stone-800 shrink-0">
-          <h3 className="text-base font-black text-stone-100 capitalize">{mode}</h3>
+          <h3 className="text-base font-black text-stone-100 uppercase tracking-wider flex items-center gap-2">
+            <span>{mode === 'followers' ? 'B-Liever' : 'B-Lieving'}</span>
+            <span className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[10px] font-black rounded-full">
+              {users.length}
+            </span>
+          </h3>
           <button onClick={onClose} className="p-2 rounded-xl text-stone-500 hover:text-stone-200 hover:bg-stone-900 transition-all cursor-pointer">
             <X className="w-5 h-5" />
           </button>
@@ -137,7 +142,7 @@ export default function FollowersListModal({
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search..."
-            className="w-full bg-stone-900 border border-stone-800 rounded-xl px-4 py-2 text-sm text-stone-100 placeholder:text-stone-600 focus:outline-none focus:border-violet-600 transition-all"
+            className="w-full bg-stone-900 border border-stone-800 rounded-xl px-4 py-2 text-sm text-stone-100 placeholder:text-stone-600 focus:outline-none focus:border-amber-500 transition-all"
           />
         </div>
 
@@ -145,7 +150,7 @@ export default function FollowersListModal({
         <div className="flex-1 overflow-y-auto">
           {loading && (
             <div className="flex items-center justify-center py-16">
-              <Loader2 className="w-6 h-6 text-violet-500 animate-spin" />
+              <Loader2 className="w-6 h-6 text-amber-500 animate-spin" />
             </div>
           )}
 
@@ -153,7 +158,7 @@ export default function FollowersListModal({
             <div className="flex flex-col items-center justify-center py-16 text-center">
               <Users className="w-10 h-10 text-stone-800 mb-3" />
               <p className="text-stone-500 font-bold text-sm">
-                {search ? 'No results' : mode === 'followers' ? 'No followers yet' : 'Not following anyone'}
+                {search ? 'No results' : mode === 'followers' ? 'No B-Lievers yet' : 'Not believing anyone'}
               </p>
             </div>
           )}
@@ -197,8 +202,8 @@ export default function FollowersListModal({
                     {isLoading
                       ? <Loader2 className="w-3 h-3 animate-spin" />
                       : following
-                        ? <><UserCheck className="w-3 h-3" />Following</>
-                        : <><UserPlus className="w-3 h-3" />Follow</>
+                        ? <><UserCheck className="w-3 h-3" />B-Lieving</>
+                        : <><UserPlus className="w-3 h-3" />B-Lieve</>
                     }
                   </button>
                 )}

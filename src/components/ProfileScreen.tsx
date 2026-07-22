@@ -2004,13 +2004,13 @@ export default function ProfileScreen({
                   setConnectionsModalType('followers');
                   setConnectionsSearch('');
                 }}
-                className="flex items-center gap-1 hover:bg-stone-950/80 hover:text-stone-50 border border-transparent hover:border-stone-900 rounded-xl px-3 py-1 transition-all text-left cursor-pointer outline-none"
-                title="View followers"
+                className="flex items-center gap-1.5 hover:bg-stone-900/80 border border-stone-850 hover:border-amber-500/40 rounded-xl px-3.5 py-1.5 transition-all text-left cursor-pointer outline-none group shadow-sm"
+                title="View B-Liever"
               >
-                <span className="font-extrabold text-stone-100">
+                <span className="font-black text-stone-100 text-sm">
                   {dbFollowersCount}
                 </span>
-                <span className="text-stone-400 text-xs font-medium">followers</span>
+                <span className="text-amber-400 font-black text-xs uppercase tracking-wider group-hover:text-amber-300">B-Liever</span>
               </button>
 
               <button
@@ -2018,13 +2018,13 @@ export default function ProfileScreen({
                   setConnectionsModalType('following');
                   setConnectionsSearch('');
                 }}
-                className="flex items-center gap-1 hover:bg-stone-950/80 hover:text-stone-50 border border-transparent hover:border-stone-900 rounded-xl px-3 py-1 transition-all text-left cursor-pointer outline-none"
-                title="View following"
+                className="flex items-center gap-1.5 hover:bg-stone-900/80 border border-stone-850 hover:border-amber-500/40 rounded-xl px-3.5 py-1.5 transition-all text-left cursor-pointer outline-none group shadow-sm"
+                title="View B-Lieving"
               >
-                <span className="font-extrabold text-stone-100">
+                <span className="font-black text-stone-100 text-sm">
                   {dbFollowingCount}
                 </span>
-                <span className="text-stone-400 text-xs font-medium">following</span>
+                <span className="text-amber-400 font-black text-xs uppercase tracking-wider group-hover:text-amber-300">B-Lieving</span>
               </button>
             </div>
 

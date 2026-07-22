@@ -84,7 +84,7 @@ export default function FollowButton({
           onClick={handleUnfollow}
           className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-bold rounded-xl cursor-pointer transition-all"
         >
-          Unfollow
+          Stop B-Lieving
         </button>
         <button
           onClick={() => setShowConfirm(false)}
@@ -98,10 +98,10 @@ export default function FollowButton({
 
   const buttonContent = () => {
     if (loading) return <><Loader2 className="w-3.5 h-3.5 animate-spin" />Loading...</>;
-    if (hasPendingRequest) return <><Clock className="w-3.5 h-3.5" />Requested</>;
-    if (isFollowing) return <><Check className="w-3.5 h-3.5" />Following</>;
-    if (targetIsPrivate) return <><Clock className="w-3.5 h-3.5" />Request Follow</>;
-    return <><UserPlus className="w-3.5 h-3.5" />Follow</>;
+    if (hasPendingRequest) return <><Clock className="w-3.5 h-3.5" />Requested B-Lieving</>;
+    if (isFollowing) return <><Check className="w-3.5 h-3.5" />B-Lieving</>;
+    if (targetIsPrivate) return <><Clock className="w-3.5 h-3.5" />Request B-Lieving</>;
+    return <><UserPlus className="w-3.5 h-3.5" />B-Lieve</>;
   };
 
   const buttonStyle = () => {
@@ -121,8 +121,8 @@ export default function FollowButton({
       </button>
       {showStats && stats && (
         <div className="flex gap-3 text-xs text-stone-500 mt-1">
-          <span><span className="text-stone-200 font-bold">{stats.followersCount.toLocaleString()}</span> followers</span>
-          <span><span className="text-stone-200 font-bold">{stats.followingCount.toLocaleString()}</span> following</span>
+          <span><span className="text-stone-200 font-extrabold">{stats.followersCount.toLocaleString()}</span> <strong className="font-black text-amber-400">B-Liever</strong></span>
+          <span><span className="text-stone-200 font-extrabold">{stats.followingCount.toLocaleString()}</span> <strong className="font-black text-amber-400">B-Lieving</strong></span>
         </div>
       )}
     </div>

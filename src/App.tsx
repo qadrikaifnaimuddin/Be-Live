@@ -705,6 +705,7 @@ export default function App() {
                 activeChatUserId={activeChatUserId}
                 onClearActiveChatUser={() => setActiveChatUserId(undefined)}
                 onStartCall={handleStartCall}
+                onBack={() => setActiveTab('profile')}
               />
             )}
 

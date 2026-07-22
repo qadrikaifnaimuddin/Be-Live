@@ -9,17 +9,21 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Lock, ShieldCheck, Phone, Video, Send, Image as ImageIcon,
   Eye, CheckCheck, Check, X, Mic, MicOff, VideoOff,
-  Play, Pause, Info, ChevronLeft, Sparkles,
+  Play, Pause, Info, ChevronLeft, ArrowLeft, Sparkles,
   EyeOff, Users, Radio, Flame, Clock, Heart,
   MessageCircle, Search, MessageSquare, ArrowUpRight, ArrowDownLeft,
   PhoneMissed, Trash2, History, Palette, Smile, VolumeX,
   CornerUpLeft, MapPin, Pin, Share2, Navigation, BarChart3,
   Eraser, Undo2, Hash
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { User, Message, CallSession, ChatRoom, Streak, Post, CallHistoryRecord } from '../types';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 import { DoodleCanvasModal } from './DoodleCanvasModal';
 import { ActiveCallOverlay } from './ActiveCallOverlay';
+import { DirectMessagesView } from './chat/DirectMessagesView';
+import { GroupChatsView } from './chat/GroupChatsView';
+import { ChannelsView } from './chat/ChannelsView';
 
 
 // ─────────────────────────────────────────────
@@ -35,6 +39,7 @@ interface MessagesScreenProps {
   activeChatUserId?: string;
   onClearActiveChatUser?: () => void;
   onStartCall?: (targetUser: User, type: 'audio' | 'video') => void;
+  onBack?: () => void;
 }
 
 // ─────────────────────────────────────────────
@@ -139,10 +144,11 @@ const renderFormattedText = (text: string, searchQuery?: string) => {
 // ─────────────────────────────────────────────
 // Supabase row mappers
 // ─────────────────────────────────────────────
-const dbRowToMessage = (row: any): Message => ({
+const dbRowToMessage = (row: any): Message & { roomId?: string } => ({
   id: row.id,
   senderId: row.sender_id,
   receiverId: row.receiver_id || row.room_id,
+  roomId: row.room_id,
   senderName: row.profiles?.name,
   senderAvatar: row.profiles?.avatar,
   text: row.text,
@@ -204,7 +210,9 @@ export default function MessagesScreen({
   activeChatUserId,
   onClearActiveChatUser,
   onStartCall,
+  onBack,
 }: MessagesScreenProps) {
+  const navigate = useNavigate();
 
   // ── Sidebar ──
   const [activeSidebarTab, setActiveSidebarTab] = useState<'all' | 'direct' | 'groups' | 'channels' | 'calls'>('all');
@@ -793,7 +801,7 @@ export default function MessagesScreen({
     return () => {
       supabase.removeChannel(globalChannel);
     };
-  }, [currentUser.id, loadRooms]);
+  }, [currentUser?.id, loadRooms]);
 
   // ─────────────────────────────────────────────
   // Load messages
@@ -842,7 +850,7 @@ export default function MessagesScreen({
   useEffect(() => { loadMessages(); }, [loadMessages]);
 
   // ─────────────────────────────────────────────
-  // Realtime subscription
+  // Active chat Realtime subscription
   // ─────────────────────────────────────────────
   useEffect(() => {
     if (!selectedChat || !isSupabaseConfigured || !supabase) return;
@@ -859,12 +867,17 @@ export default function MessagesScreen({
         event: 'INSERT',
         schema: 'public',
         table: 'messages',
-        // For DMs: no server-side filter — we check sender/receiver in the callback
-        filter: chatIsRoom ? `room_id=eq.${selectedChat.id}` : undefined,
       }, (payload) => {
         const newMsg = dbRowToMessage(payload.new);
-        if (!chatIsRoom) {
-          // Only accept messages that are between currentUser and selectedChat
+        if (chatIsRoom) {
+          const roomObj = selectedChat as ChatRoom;
+          const otherId = roomObj.members.find(m => m !== currentUser.id);
+          const isMatchingRoom = newMsg.roomId === roomObj.id || newMsg.receiverId === roomObj.id;
+          const isMatchingDM =
+            (newMsg.senderId === currentUser.id && newMsg.receiverId === otherId) ||
+            (newMsg.senderId === otherId && newMsg.receiverId === currentUser.id);
+          if (!isMatchingRoom && !isMatchingDM) return;
+        } else {
           const myId = currentUser.id;
           const otherId = (selectedChat as User).id;
           const validDM =
@@ -885,7 +898,6 @@ export default function MessagesScreen({
               read_at: isFocused ? now : null
             }).eq('id', newMsg.id).then();
 
-            // Broadcast checkmarks instantly
             channel.send({
               type: 'broadcast',
               event: 'status_update',
@@ -1826,7 +1838,22 @@ export default function MessagesScreen({
           {/* Header */}
           <div className="p-4 border-b border-stone-900">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-black text-stone-100 flex items-center gap-2"><MessageCircle className="w-5 h-5 text-violet-400" />Messages</h2>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    if (onBack) onBack();
+                    else navigate(-1);
+                  }}
+                  className="p-1.5 text-stone-400 hover:text-stone-100 hover:bg-stone-900 rounded-xl transition-all cursor-pointer"
+                  title="Go Back"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+                <h2 className="text-lg font-black text-stone-100 flex items-center gap-2">
+                  <MessageCircle className="w-5 h-5 text-violet-400" />
+                  Messages
+                </h2>
+              </div>
               <div className="flex gap-1">
                 <button onClick={() => setShowCreateGroupModal(true)} className="p-2 text-stone-400 hover:text-violet-400 hover:bg-violet-500/10 rounded-xl transition-all cursor-pointer" title="New Group"><Users className="w-4 h-4" /></button>
                 <button onClick={() => setShowCreateChannelModal(true)} className="p-2 text-stone-400 hover:text-amber-400 hover:bg-amber-500/10 rounded-xl transition-all cursor-pointer" title="New Channel"><Hash className="w-4 h-4" /></button>
@@ -1932,57 +1959,89 @@ export default function MessagesScreen({
           )}
 
           {activeSidebarTab !== 'calls' && (
-          <div className="flex-1 overflow-y-auto">
-
-            {filteredRooms
-              .filter(r => {
-                if (activeSidebarTab === 'all') return true;
-                // Map tab names to actual DB room types (tab uses plural, DB uses singular)
-                const tabTypeMap: Record<string, string> = { direct: 'direct', groups: 'group', channels: 'channel' };
-                return r.type === tabTypeMap[activeSidebarTab];
-              })
-              .map(room => {
-                const sel = selectedChat && 'type' in selectedChat && (selectedChat as ChatRoom).id === room.id;
-                const otherMemberId = room.type === 'direct' ? room.members.find(m => m !== currentUser.id) : null;
-                const isOnline = room.type === 'direct' && otherMemberId && isOnlinePlatformWide(room.lastSeen);
-                return (
-                  <button
-                    key={room.id}
-                    onClick={() => {
-                      if (!chatDeleteHoldTimerRef.current) {
-                        selectChatRoom(room);
-                      }
-                    }}
-                    onMouseDown={() => startChatDeleteHold(room.id)}
-                    onMouseUp={cancelChatDeleteHold}
-                    onMouseLeave={cancelChatDeleteHold}
-                    onTouchStart={() => startChatDeleteHold(room.id)}
-                    onTouchEnd={cancelChatDeleteHold}
-                    className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-stone-900/60 transition-all text-left cursor-pointer border-b border-stone-900/40 ${sel ? 'bg-violet-500/10 border-l-2 border-l-violet-500' : ''}`}
-                  >
-                    <div className="relative shrink-0">
-                      <img src={room.avatar || 'https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&w=60&h=60&q=80'} alt={room.name} className="w-11 h-11 rounded-full object-cover border border-stone-800" />
-                      {isOnline && (
-                        <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 rounded-full border-2 border-stone-950" />
-                      )}
-                      {room.type === 'group' && <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-violet-600 rounded-full flex items-center justify-center"><Users className="w-2.5 h-2.5 text-white" /></div>}
-                      {room.type === 'channel' && <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-amber-500 rounded-full flex items-center justify-center"><Radio className="w-2.5 h-2.5 text-white" /></div>}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-bold text-stone-100 truncate">{room.name}</p>
-                        {room.lastMessageTime && <span className="text-[10px] text-stone-600 shrink-0">{formatTime(room.lastMessageTime)}</span>}
+            <div className="flex-1 overflow-y-auto">
+              {activeSidebarTab === 'direct' ? (
+                <DirectMessagesView
+                  rooms={filteredRooms}
+                  selectedChat={selectedChat}
+                  currentUserId={currentUser.id}
+                  sidebarTypingUsers={sidebarTypingUsers}
+                  isOnlinePlatformWide={isOnlinePlatformWide}
+                  getStreak={getStreak}
+                  onSelectRoom={selectChatRoom}
+                  startChatDeleteHold={startChatDeleteHold}
+                  cancelChatDeleteHold={cancelChatDeleteHold}
+                  chatDeleteHoldTimerRef={chatDeleteHoldTimerRef}
+                  formatTime={formatTime}
+                />
+              ) : activeSidebarTab === 'groups' ? (
+                <GroupChatsView
+                  rooms={filteredRooms}
+                  selectedChat={selectedChat}
+                  currentUserId={currentUser.id}
+                  onSelectRoom={selectChatRoom}
+                  onOpenCreateGroupModal={() => setShowCreateGroupModal(true)}
+                  startChatDeleteHold={startChatDeleteHold}
+                  cancelChatDeleteHold={cancelChatDeleteHold}
+                  chatDeleteHoldTimerRef={chatDeleteHoldTimerRef}
+                  formatTime={formatTime}
+                />
+              ) : activeSidebarTab === 'channels' ? (
+                <ChannelsView
+                  rooms={filteredRooms}
+                  selectedChat={selectedChat}
+                  currentUserId={currentUser.id}
+                  onSelectRoom={selectChatRoom}
+                  onOpenCreateChannelModal={() => setShowCreateChannelModal(true)}
+                  startChatDeleteHold={startChatDeleteHold}
+                  cancelChatDeleteHold={cancelChatDeleteHold}
+                  chatDeleteHoldTimerRef={chatDeleteHoldTimerRef}
+                  formatTime={formatTime}
+                />
+              ) : (
+                filteredRooms.map(room => {
+                  const sel = selectedChat && 'type' in selectedChat && (selectedChat as ChatRoom).id === room.id;
+                  const otherMemberId = room.type === 'direct' ? room.members.find(m => m !== currentUser.id) : null;
+                  const isOnline = room.type === 'direct' && otherMemberId && isOnlinePlatformWide(room.lastSeen);
+                  return (
+                    <button
+                      key={room.id}
+                      onClick={() => {
+                        if (!chatDeleteHoldTimerRef.current) {
+                          selectChatRoom(room);
+                        }
+                      }}
+                      onMouseDown={() => startChatDeleteHold(room.id)}
+                      onMouseUp={cancelChatDeleteHold}
+                      onMouseLeave={cancelChatDeleteHold}
+                      onTouchStart={() => startChatDeleteHold(room.id)}
+                      onTouchEnd={cancelChatDeleteHold}
+                      className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-stone-900/60 transition-all text-left cursor-pointer border-b border-stone-900/40 ${sel ? 'bg-violet-500/10 border-l-2 border-l-violet-500' : ''}`}
+                    >
+                      <div className="relative shrink-0">
+                        <img src={room.avatar || 'https://images.unsplash.com/photo-1582213782179-e0d53f98f2ca?auto=format&fit=crop&w=60&h=60&q=80'} alt={room.name} className="w-11 h-11 rounded-full object-cover border border-stone-800" />
+                        {isOnline && (
+                          <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 rounded-full border-2 border-stone-950" />
+                        )}
+                        {room.type === 'group' && <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-violet-600 rounded-full flex items-center justify-center"><Users className="w-2.5 h-2.5 text-white" /></div>}
+                        {room.type === 'channel' && <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-amber-500 rounded-full flex items-center justify-center"><Radio className="w-2.5 h-2.5 text-white" /></div>}
                       </div>
-                      {room.type === 'direct' && otherMemberId && sidebarTypingUsers[otherMemberId] ? (
-                        <p className="text-xs text-violet-400 font-medium animate-pulse">typing...</p>
-                      ) : (
-                        <p className="text-xs text-stone-500 truncate">{room.lastMessage || 'No messages yet'}</p>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
-          </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-bold text-stone-100 truncate">{room.name}</p>
+                          {room.lastMessageTime && <span className="text-[10px] text-stone-600 shrink-0">{formatTime(room.lastMessageTime)}</span>}
+                        </div>
+                        {room.type === 'direct' && otherMemberId && sidebarTypingUsers[otherMemberId] ? (
+                          <p className="text-xs text-violet-400 font-medium animate-pulse">typing...</p>
+                        ) : (
+                          <p className="text-xs text-stone-500 truncate">{room.lastMessage || 'No messages yet'}</p>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
           )}
 
         </div>
