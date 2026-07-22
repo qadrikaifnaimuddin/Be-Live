@@ -101,6 +101,7 @@ export default function StrangerChatModal({
   const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const disconnectMonitorChRef = useRef<any>(null);
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
 
   // Clean up WebRTC session & channel connections
   const cleanUpSession = async (shouldCleanDB = true) => {
@@ -144,7 +145,7 @@ export default function StrangerChatModal({
     updateSessionId(null);
   };
 
-  // Keyboard shortcut Esc to skip matching
+  // Keyboard shortcut listener for Esc key (Skip / Confirm)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isOpen) return;
@@ -169,15 +170,21 @@ export default function StrangerChatModal({
 
   // Request local camera stream
   useEffect(() => {
-    if (isOpen && chatMode === 'video' && cameraOn) {
+    if (isOpen && chatMode === 'video') {
       navigator.mediaDevices.getUserMedia({
         video: { facingMode: cameraFacing },
-        audio: true
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
       })
       .then(stream => {
         setLocalStream(stream);
+        localStreamRef.current = stream;
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
+          localVideoRef.current.play().catch(() => {});
         }
         // If we have an active WebRTC peer connection, swap or add tracks
         if (peerConnectionRef.current) {
@@ -218,6 +225,10 @@ export default function StrangerChatModal({
         ]);
       });
     } else {
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(t => t.stop());
+        localStreamRef.current = null;
+      }
       if (localStream) {
         localStream.getTracks().forEach(t => t.stop());
         setLocalStream(null);
@@ -225,16 +236,21 @@ export default function StrangerChatModal({
     }
 
     return () => {
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(t => t.stop());
+        localStreamRef.current = null;
+      }
       if (localStream) {
         localStream.getTracks().forEach(t => t.stop());
       }
     };
-  }, [isOpen, chatMode, cameraOn, cameraFacing]);
+  }, [isOpen, chatMode, cameraFacing]);
 
   // Synchronize local stream to localVideoRef
   useEffect(() => {
-    if (localStream && localVideoRef.current) {
-      localVideoRef.current.srcObject = localStream;
+    const activeStream = localStreamRef.current || localStream;
+    if (activeStream && localVideoRef.current) {
+      localVideoRef.current.srcObject = activeStream;
     }
   }, [localStream, cameraOn]);
 
@@ -242,6 +258,7 @@ export default function StrangerChatModal({
   useEffect(() => {
     if (remoteStream && remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = remoteStream;
+      remoteVideoRef.current.volume = 1.0;
     }
   }, [remoteStream]);
 
@@ -249,6 +266,7 @@ export default function StrangerChatModal({
   useEffect(() => {
     if (remoteVideoRef.current) {
       remoteVideoRef.current.muted = !speakerOn;
+      remoteVideoRef.current.volume = 1.0;
     }
   }, [speakerOn, remoteStream]);
 
@@ -304,23 +322,27 @@ export default function StrangerChatModal({
 
   // Toggle local streams
   const toggleCamera = () => {
-    if (localStream) {
-      const videoTrack = localStream.getVideoTracks()[0];
+    const nextState = !cameraOn;
+    setCameraOn(nextState);
+    const activeStream = localStreamRef.current || localStream;
+    if (activeStream) {
+      const videoTrack = activeStream.getVideoTracks()[0];
       if (videoTrack) {
-        videoTrack.enabled = !cameraOn;
+        videoTrack.enabled = nextState;
       }
     }
-    setCameraOn(!cameraOn);
   };
 
   const toggleMic = () => {
-    if (localStream) {
-      const audioTrack = localStream.getAudioTracks()[0];
+    const nextState = !micOn;
+    setMicOn(nextState);
+    const activeStream = localStreamRef.current || localStream;
+    if (activeStream) {
+      const audioTrack = activeStream.getAudioTracks()[0];
       if (audioTrack) {
-        audioTrack.enabled = !micOn;
+        audioTrack.enabled = nextState;
       }
     }
-    setMicOn(!micOn);
   };
 
   const flipCamera = () => {
@@ -393,31 +415,23 @@ export default function StrangerChatModal({
     };
 
     // Attach local stream tracks
-    if (localStream) {
-      localStream.getTracks().forEach(track => {
-        pc.addTrack(track, localStream);
+    const activeStream = localStreamRef.current || localStream;
+    if (activeStream) {
+      activeStream.getTracks().forEach(track => {
+        pc.addTrack(track, activeStream);
       });
     }
 
     // Capture remote stream track
     pc.ontrack = (event) => {
-      console.log("[StrangerChat] ontrack event received:", event);
-      const [remoteStream] = event.streams;
-      if (remoteStream) {
-        setRemoteStream(remoteStream);
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = remoteStream;
-        }
-      } else {
-        // Create new MediaStream from track if streams list is empty
-        setRemoteStream(prev => {
-          const current = prev || new MediaStream();
-          current.addTrack(event.track);
-          if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = current;
-          }
-          return current;
-        });
+      console.log("[StrangerChat] ontrack event received:", event.track.kind, event);
+      const incomingStream = (event.streams && event.streams[0]) ? event.streams[0] : new MediaStream([event.track]);
+      const updatedStream = new MediaStream(incomingStream.getTracks());
+      setRemoteStream(updatedStream);
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = updatedStream;
+        remoteVideoRef.current.volume = 1.0;
+        remoteVideoRef.current.play().catch(e => console.warn("Remote play error:", e));
       }
     };
 
