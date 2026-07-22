@@ -728,11 +728,11 @@ export default function App() {
           {/* ── Bottom Navigation ── */}
           {!(activeTab === 'messages' && isChatActive) && tab !== 'search' && (
             <nav className="fixed bottom-0 left-0 right-0 z-20 bg-stone-950/95 border-t border-stone-900 backdrop-blur-lg">
-              <div className="flex items-center justify-around py-1.5 sm:py-2 max-w-lg mx-auto">
+              <div className="flex items-center justify-around py-1.5 sm:py-2 max-w-xl mx-auto px-1">
 
                 <button
                   onClick={() => setActiveTab('profile')}
-                  className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1.5 sm:px-4 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'profile' ? 'text-stone-100' : 'text-stone-600 hover:text-stone-400'}`}
+                  className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1 sm:px-3 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'profile' ? 'text-stone-100' : 'text-stone-600 hover:text-stone-400'}`}
                 >
                   <div className={`p-1.5 sm:p-2 rounded-xl transition-all ${activeTab === 'profile' ? 'bg-stone-800' : ''}`}>
                     <UserIcon className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
@@ -742,7 +742,7 @@ export default function App() {
 
                 <button
                   onClick={() => setActiveTab('search')}
-                  className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1.5 sm:px-4 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer ${tab === 'search' ? 'text-emerald-400' : 'text-stone-600 hover:text-stone-400'}`}
+                  className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1 sm:px-3 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer ${tab === 'search' ? 'text-emerald-400' : 'text-stone-600 hover:text-stone-400'}`}
                 >
                   <div className={`p-1.5 sm:p-2 rounded-xl transition-all ${tab === 'search' ? 'bg-emerald-500/20' : ''}`}>
                     <Search className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
@@ -752,7 +752,7 @@ export default function App() {
 
                 <button
                   onClick={() => setActiveTab('messages')}
-                  className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1.5 sm:px-4 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'messages' ? 'text-violet-400' : 'text-stone-600 hover:text-stone-400'}`}
+                  className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1 sm:px-3 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'messages' ? 'text-violet-400' : 'text-stone-600 hover:text-stone-400'}`}
                 >
                   <div className={`p-1.5 sm:p-2 rounded-xl transition-all ${activeTab === 'messages' ? 'bg-violet-500/20' : ''}`}>
                     <MessageCircle className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
@@ -760,19 +760,25 @@ export default function App() {
                   <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider hidden sm:block">Messages</span>
                 </button>
 
+                {/* ── LIVE STREAM BUTTON (Highlighted) ── */}
                 <button
                   onClick={() => setActiveTab('live_stream')}
-                  className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1.5 sm:px-4 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'live_stream' ? 'text-rose-400' : 'text-stone-600 hover:text-stone-400'}`}
+                  className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1 sm:px-3 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer relative ${
+                    activeTab === 'live_stream' ? 'text-rose-400 scale-105' : 'text-rose-500/80 hover:text-rose-400'
+                  }`}
                 >
-                  <div className={`p-1.5 sm:p-2 rounded-xl transition-all ${activeTab === 'live_stream' ? 'bg-rose-500/20' : ''}`}>
-                    <Radio className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
+                  <div className={`relative p-1.5 sm:p-2 rounded-xl transition-all ${
+                    activeTab === 'live_stream' ? 'bg-rose-500/25 ring-1 ring-rose-500/50' : 'bg-rose-500/10 hover:bg-rose-500/20'
+                  }`}>
+                    <Radio className="w-4.5 h-4.5 sm:w-5 sm:h-5 text-rose-500 animate-pulse" />
+                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-rose-500 animate-ping inline-block"></span>
                   </div>
-                  <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider hidden sm:block">Live</span>
+                  <span className="text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wider hidden sm:block text-rose-400">Live</span>
                 </button>
 
                 <button
                   onClick={() => setActiveTab('stranger_chat')}
-                  className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1.5 sm:px-4 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'stranger_chat' ? 'text-pink-400' : 'text-stone-600 hover:text-stone-400'}`}
+                  className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1 sm:px-3 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'stranger_chat' ? 'text-pink-400' : 'text-stone-600 hover:text-stone-400'}`}
                 >
                   <div className={`p-1.5 sm:p-2 rounded-xl transition-all ${activeTab === 'stranger_chat' ? 'bg-pink-500/20' : ''}`}>
                     <Shuffle className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
@@ -782,7 +788,7 @@ export default function App() {
 
                 <button
                   onClick={() => setActiveTab('lounge')}
-                  className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1.5 sm:px-4 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'lounge' ? 'text-amber-400' : 'text-stone-600 hover:text-stone-400'}`}
+                  className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1 sm:px-3 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer ${activeTab === 'lounge' ? 'text-amber-400' : 'text-stone-600 hover:text-stone-400'}`}
                 >
                   <div className={`p-1.5 sm:p-2 rounded-xl transition-all ${activeTab === 'lounge' ? 'bg-amber-500/20' : ''}`}>
                     <Coffee className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
@@ -792,7 +798,7 @@ export default function App() {
 
                 <button
                   onClick={() => setActiveTab('notifications')}
-                  className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1.5 sm:px-4 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer relative ${activeTab === 'notifications' ? 'text-amber-400' : 'text-stone-600 hover:text-stone-400'}`}
+                  className={`flex flex-col items-center gap-0.5 sm:gap-1 px-1 sm:px-3 py-1 sm:py-2 rounded-2xl transition-all cursor-pointer relative ${activeTab === 'notifications' ? 'text-amber-400' : 'text-stone-600 hover:text-stone-400'}`}
                 >
                   <div className={`relative p-1.5 sm:p-2 rounded-xl transition-all ${activeTab === 'notifications' ? 'bg-amber-500/20' : ''}`}>
                     <Bell className="w-4.5 h-4.5 sm:w-5 sm:h-5" />
