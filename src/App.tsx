@@ -455,11 +455,33 @@ export default function App() {
 
     if (isSupabaseConfigured && supabase) {
       try {
+        let finalUrl = mediaUrl;
+        if (mediaUrl.startsWith('data:') || mediaUrl.startsWith('blob:')) {
+          try {
+            const res = await fetch(mediaUrl);
+            const blob = await res.blob();
+            const ext = mediaType === 'video' ? 'mp4' : 'jpg';
+            const fileName = `story_${currentUser.id}_${Date.now()}.${ext}`;
+            const { data: uploadData, error: uploadErr } = await supabase.storage
+              .from('stories')
+              .upload(fileName, blob, { contentType: blob.type, upsert: true });
+
+            if (!uploadErr && uploadData) {
+              const { data: publicUrlData } = supabase.storage.from('stories').getPublicUrl(uploadData.path);
+              if (publicUrlData?.publicUrl) {
+                finalUrl = publicUrlData.publicUrl;
+              }
+            }
+          } catch (e) {
+            console.warn('[handleAddStory] Storage upload warning:', e);
+          }
+        }
+
         const { data, error } = await supabase
           .from('stories')
           .insert({
             user_id: currentUser.id,
-            media_url: mediaUrl,
+            media_url: finalUrl,
             media_type: mediaType,
             caption: caption,
             expires_at: expiresAtDate.toISOString()
@@ -472,6 +494,7 @@ export default function App() {
           setStories(prev => prev.map(s => s.id === tempId ? {
             ...s,
             id: data.id,
+            mediaUrl: data.media_url || finalUrl,
             createdAt: data.created_at,
             expiresAt: data.expires_at
           } : s));

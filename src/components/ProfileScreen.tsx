@@ -1935,15 +1935,17 @@ export default function ProfileScreen({
         <div className="flex flex-col md:flex-row items-center gap-6 md:gap-10">
           {/* Avatar Area */}
           <div 
-            onClick={() => setShowAvatarLightbox(true)}
-            className="relative shrink-0 cursor-pointer hover:scale-[1.02] active:scale-[0.98] transition-all"
-            title="Click to view avatar"
+            className="relative shrink-0 transition-all"
           >
-            <div className={`p-[3.5px] rounded-full ${
-              localStorage.getItem(`golden_ring_${isOwnProfile ? currentUser.id : user.id}`) === 'true'
-                ? 'bg-gradient-to-tr from-yellow-400 via-amber-200 to-yellow-600 shadow-md ring-2 ring-yellow-400/30'
-                : 'bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600'
-            }`}>
+            <div 
+              onClick={() => setShowAvatarLightbox(true)}
+              className={`p-[3.5px] rounded-full cursor-pointer hover:scale-[1.02] active:scale-[0.98] transition-all ${
+                localStorage.getItem(`golden_ring_${isOwnProfile ? currentUser.id : user.id}`) === 'true'
+                  ? 'bg-gradient-to-tr from-yellow-400 via-amber-200 to-yellow-600 shadow-md ring-2 ring-yellow-400/30'
+                  : 'bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600'
+              }`}
+              title="Click to view avatar"
+            >
               <img
                 src={isOwnProfile ? currentUser.avatar : user.avatar}
                 alt={user.name}
@@ -1951,6 +1953,18 @@ export default function ProfileScreen({
                 className="w-24 h-24 md:w-32 md:h-32 rounded-full object-cover border-4 border-stone-900"
               />
             </div>
+            {isOwnProfile && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  storyFileInputRef.current?.click();
+                }}
+                className="absolute bottom-1 right-1 w-8 h-8 rounded-full bg-gradient-to-tr from-violet-600 to-amber-500 text-white flex items-center justify-center border-2 border-stone-950 shadow-xl hover:scale-110 active:scale-95 transition-all cursor-pointer"
+                title="Add Story"
+              >
+                <Plus className="w-4 h-4 stroke-[3]" />
+              </button>
+            )}
           </div>
 
           {/* User Bio & Meta Area */}
@@ -1972,6 +1986,13 @@ export default function ProfileScreen({
               <div className="flex flex-wrap gap-2 justify-center md:justify-start">
                 {isOwnProfile ? (
                   <>
+                    <button
+                      onClick={() => storyFileInputRef.current?.click()}
+                      className="px-4 py-1.5 bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-lg hover:brightness-110 active:scale-95"
+                      title="Add Story"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> {isUploadingStory ? 'Uploading...' : 'Add Story'}
+                    </button>
                     <button
                       id="btn_avatar_studio_trigger"
                       onClick={() => setShowAvatarStudio(true)}
@@ -3649,6 +3670,13 @@ export default function ProfileScreen({
                 accept="image/*"
                 className="hidden"
                 onChange={handleLightboxFileChange}
+              />
+              <input
+                ref={storyFileInputRef}
+                type="file"
+                accept="image/*,video/*"
+                className="hidden"
+                onChange={handleStoryUpload}
               />
             </motion.div>
           </div>
