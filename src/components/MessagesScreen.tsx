@@ -145,14 +145,14 @@ const renderFormattedText = (text: string, searchQuery?: string) => {
 // Supabase row mappers
 // ─────────────────────────────────────────────
 const dbRowToMessage = (row: any): Message & { roomId?: string } => {
-  const isSenderDeleted = !row.profiles && row.sender_id !== undefined;
+  const isSenderDeleted = row.profiles === null;
   return {
     id: row.id,
     senderId: row.sender_id,
     receiverId: row.receiver_id || row.room_id,
     roomId: row.room_id,
-    senderName: isSenderDeleted ? 'User deleted account' : (row.profiles?.name || row.profiles?.username || 'User'),
-    senderAvatar: isSenderDeleted ? 'https://api.dicebear.com/7.x/initials/svg?seed=Deleted+User' : (row.profiles?.avatar || ''),
+    senderName: isSenderDeleted ? 'User deleted account' : (row.profiles?.name || row.profiles?.username || row.senderName || 'User'),
+    senderAvatar: isSenderDeleted ? 'https://api.dicebear.com/7.x/initials/svg?seed=Deleted+User' : (row.profiles?.avatar || row.senderAvatar || ''),
     text: isSenderDeleted ? 'User deleted account' : row.text,
     mediaUrl: isSenderDeleted ? undefined : row.media_url,
     mediaType: isSenderDeleted ? undefined : row.media_type,

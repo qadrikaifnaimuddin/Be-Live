@@ -58,6 +58,8 @@ import FollowersListModal from './FollowersListModal';
 import { StoriesAndHighlightsView } from './stories/StoriesAndHighlightsView';
 import { StoryViewerModal } from './stories/StoryViewerModal';
 import { CreateHighlightModal } from './stories/CreateHighlightModal';
+import { ActiveStoryViewerModal } from './stories/ActiveStoryViewerModal';
+import { StoryUploadModal } from './stories/StoryUploadModal';
 
 interface ProfileScreenProps {
   user: User;
@@ -84,6 +86,7 @@ interface ProfileScreenProps {
   onLogout?: () => void;
   onDeleteAccount?: () => void;
   onOpenMessages?: (userId: string) => void;
+  onRecordStoryView?: (storyId: string, watchTimeSeconds: number) => void;
 }
 
 export default function ProfileScreen({
@@ -100,12 +103,108 @@ export default function ProfileScreen({
   onUpdateProfileSettings,
   onViewProfile,
   onLogout,
-  onDeleteAccount
+  onDeleteAccount,
+  onRecordStoryView
 }: ProfileScreenProps) {
+  const isOwnProfile = currentUser.id === user.id;
   const [isEditing, setIsEditing] = useState(false);
+  const [showActiveStoriesModal, setShowActiveStoriesModal] = useState(false);
   const [showAvatarLightbox, setShowAvatarLightbox] = useState(false);
+  const [targetHighlights, setTargetHighlights] = useState<Highlight[]>([]);
+
+  const profileUserStories = stories.filter(s => {
+    const isTarget = s.userId === (isOwnProfile ? currentUser.id : user.id);
+    const storyTime = new Date(s.createdAt).getTime();
+    const isWithin24h = isNaN(storyTime) || storyTime > Date.now() - 24 * 60 * 60 * 1000;
+    return isTarget && isWithin24h;
+  });
+
+  const profileUserHighlights = targetHighlights.length > 0
+    ? targetHighlights
+    : highlights.filter(h => h.userId === (isOwnProfile ? currentUser.id : user.id));
+
+  useEffect(() => {
+    const targetId = isOwnProfile ? currentUser.id : user.id;
+    if (!isSupabaseConfigured || !supabase || !targetId) return;
+    supabase
+      .from('story_highlights')
+      .select('*')
+      .eq('user_id', targetId)
+      .then(({ data }) => {
+        if (data) {
+          setTargetHighlights(data.map((h: any) => ({
+            id: h.id,
+            userId: h.user_id,
+            title: h.title,
+            coverUrl: h.cover_url || '',
+            storyIds: h.story_ids || [],
+            items: h.items || [],
+            createdAt: new Date(h.created_at).toLocaleDateString(),
+          })));
+        }
+      });
+  }, [user.id, currentUser.id, isOwnProfile]);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const lightboxFileInputRef = React.useRef<HTMLInputElement>(null);
+  const storyFileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const [isUploadingStory, setIsUploadingStory] = useState(false);
+  const [selectedStoryFile, setSelectedStoryFile] = useState<File | null>(null);
+  const [storyPreviewUrl, setStoryPreviewUrl] = useState<string | null>(null);
+  const [storyMediaType, setStoryMediaType] = useState<'image' | 'video'>('image');
+  const [showStoryUploadModal, setShowStoryUploadModal] = useState(false);
+
+  const handleStoryFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || !e.target.files[0]) return;
+    const file = e.target.files[0];
+    const isVideo = file.type.startsWith('video/');
+    setSelectedStoryFile(file);
+    setStoryMediaType(isVideo ? 'video' : 'image');
+    setStoryPreviewUrl(URL.createObjectURL(file));
+    setShowStoryUploadModal(true);
+  };
+
+  const handleConfirmStorySubmit = async (caption: string) => {
+    if (!selectedStoryFile || !onAddStory) return;
+    setIsUploadingStory(true);
+    try {
+      let finalUrl = storyPreviewUrl || '';
+      if (isSupabaseConfigured && supabase) {
+        const isVideo = selectedStoryFile.type.startsWith('video/');
+        const ext = isVideo ? 'mp4' : 'jpg';
+        const fileName = `story_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
+        
+        let uploadBody: Blob | File = selectedStoryFile;
+        if (!isVideo) {
+          const compressed = await compressImage(selectedStoryFile, 1080, 1920, 0.85);
+          uploadBody = compressed.blob;
+        }
+
+        const { error: uploadErr } = await supabase.storage
+          .from('stories')
+          .upload(fileName, uploadBody, {
+            contentType: isVideo ? 'video/mp4' : 'image/jpeg',
+            upsert: true
+          });
+
+        if (!uploadErr) {
+          const { data: publicUrlData } = supabase.storage.from('stories').getPublicUrl(fileName);
+          if (publicUrlData?.publicUrl) {
+            finalUrl = publicUrlData.publicUrl;
+          }
+        }
+      }
+      await onAddStory(finalUrl, storyMediaType, caption);
+      setShowStoryUploadModal(false);
+      setSelectedStoryFile(null);
+      setStoryPreviewUrl(null);
+    } catch (err) {
+      console.error('[Story Upload Error]:', err);
+      alert('Failed to upload story');
+    } finally {
+      setIsUploadingStory(false);
+    }
+  };
 
   const extractFileName = (url: string): string | null => {
     if (!url || !url.includes('/storage/v1/object/public/avatars/')) return null;
@@ -595,7 +694,6 @@ export default function ProfileScreen({
   const [connectionsModalType, setConnectionsModalType] = useState<'followers' | 'following' | null>(null);
   const [connectionsSearch, setConnectionsSearch] = useState('');
 
-  const isOwnProfile = user.id === currentUser.id;
   const isFollowing = currentUser.following?.includes(user.id) || false;
   const isAccountPrivateAndNotFollowing = !isOwnProfile && user.isPrivate && !isFollowing;
 
@@ -991,9 +1089,6 @@ export default function ProfileScreen({
     return ageMs < 24 * 60 * 60 * 1000;
   };
 
-  const [isUploadingStory, setIsUploadingStory] = useState(false);
-  const storyFileInputRef = React.useRef<HTMLInputElement>(null);
-
   const handleStoryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || !e.target.files[0]) return;
     const file = e.target.files[0];
@@ -1286,13 +1381,21 @@ export default function ProfileScreen({
             className="relative shrink-0 transition-all"
           >
             <div 
-              onClick={() => setShowAvatarLightbox(true)}
-              className={`p-[3.5px] rounded-full cursor-pointer hover:scale-[1.02] active:scale-[0.98] transition-all ${
-                localStorage.getItem(`golden_ring_${isOwnProfile ? currentUser.id : user.id}`) === 'true'
+              onClick={() => {
+                if (profileUserStories.length > 0) {
+                  setShowActiveStoriesModal(true);
+                } else {
+                  setShowAvatarLightbox(true);
+                }
+              }}
+              className={`p-[3.5px] rounded-full cursor-pointer hover:scale-[1.05] active:scale-[0.95] transition-all relative ${
+                profileUserStories.length > 0
+                  ? 'bg-gradient-to-tr from-[#C4B99D] via-pink-500 to-amber-400 ring-4 ring-amber-400/40 shadow-xl'
+                  : localStorage.getItem(`golden_ring_${isOwnProfile ? currentUser.id : user.id}`) === 'true'
                   ? 'bg-gradient-to-tr from-yellow-400 via-amber-200 to-yellow-600 shadow-md ring-2 ring-yellow-400/30'
                   : 'bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600'
               }`}
-              title="Click to view avatar"
+              title={profileUserStories.length > 0 ? "Click to view active stories" : "Click to view avatar"}
             >
               <img
                 src={isOwnProfile ? currentUser.avatar : user.avatar}
@@ -1300,6 +1403,11 @@ export default function ProfileScreen({
                 referrerPolicy="no-referrer"
                 className="w-24 h-24 md:w-32 md:h-32 rounded-full object-cover border-4 border-stone-900"
               />
+              {profileUserStories.length > 0 && (
+                <div className="absolute top-1 right-1 bg-[#C4B99D] text-stone-950 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider shadow-md border border-stone-950 flex items-center gap-1">
+                  <Play className="w-2.5 h-2.5 fill-current" /> Story
+                </div>
+              )}
             </div>
             {isOwnProfile && (
               <button
@@ -1411,8 +1519,6 @@ export default function ProfileScreen({
         </div>
       </header>
 
-
-
       {isAccountPrivateAndNotFollowing ? (
         <div className="bg-stone-900/40 border border-stone-850 backdrop-blur-md rounded-3xl p-16 text-center shadow-sm flex flex-col items-center mt-6">
           <div className="p-4 bg-stone-950/80 text-stone-500 rounded-full inline-block mb-4">
@@ -1425,16 +1531,17 @@ export default function ProfileScreen({
         </div>
       ) : (
         <>
-          {/* ====== INSTAGRAM CIRCULAR HIGHLIGHTS ====== */}
+          {/* ====== STORIES & HIGHLIGHTS ====== */}
           <StoriesAndHighlightsView
             isOwnProfile={isOwnProfile}
-            userStories={userStories}
-            userHighlights={userHighlights}
+            userStories={profileUserStories}
+            userHighlights={profileUserHighlights}
             isUploadingStory={isUploadingStory}
             storyFileInputRef={storyFileInputRef}
-            onStoryUpload={handleStoryUpload}
+            onStoryUpload={handleStoryFileSelected}
             onOpenCreateHighlight={() => setIsCreatingHighlight(true)}
             onSelectHighlight={handleStartHighlightPlay}
+            onOpenActiveStories={() => setShowActiveStoriesModal(true)}
           />
         </>
       )}
@@ -2632,6 +2739,40 @@ export default function ProfileScreen({
           </div>
         )}
       </AnimatePresence>
+
+      {/* ACTIVE STORY VIEWER & ANALYTICS MODAL */}
+      <ActiveStoryViewerModal
+        isOpen={showActiveStoriesModal}
+        stories={profileUserStories}
+        currentUser={currentUser}
+        onClose={() => setShowActiveStoriesModal(false)}
+        onDeleteStory={onDeleteStory}
+        onRecordStoryView={onRecordStoryView}
+      />
+
+      {/* STORY UPLOAD & CAPTION MODAL */}
+      <StoryUploadModal
+        isOpen={showStoryUploadModal}
+        file={selectedStoryFile}
+        previewUrl={storyPreviewUrl}
+        mediaType={storyMediaType}
+        isUploading={isUploadingStory}
+        onClose={() => {
+          setShowStoryUploadModal(false);
+          setSelectedStoryFile(null);
+          setStoryPreviewUrl(null);
+        }}
+        onSubmitStory={handleConfirmStorySubmit}
+      />
+
+      {/* Story File Input */}
+      <input
+        ref={storyFileInputRef}
+        type="file"
+        accept="image/*,video/*"
+        className="hidden"
+        onChange={handleStoryFileSelected}
+      />
     </div>
   );
 }

@@ -294,6 +294,7 @@ export default function App() {
               caption: s.caption || '',
               createdAt: s.created_at,
               viewers: s.viewers || [],
+              viewerDetails: s.viewer_details || {},
             }))
           );
         }
@@ -312,6 +313,7 @@ export default function App() {
               title: h.title,
               coverUrl: h.cover_url || '',
               storyIds: h.story_ids || [],
+              items: h.items || [],
               createdAt: new Date(h.created_at).toLocaleDateString(),
             }))
           );
@@ -329,8 +331,8 @@ export default function App() {
     localStorage.setItem('be_live_current_user', JSON.stringify(user));
   };
 
-  const handleRegisterUser = (_user: User) => {
-    // Supabase handles persistence
+  const handleRegisterUser = (user: User) => {
+    handleLoginSuccess(user);
   };
 
   const handleLogout = async () => {
@@ -347,31 +349,135 @@ export default function App() {
     if (!currentUser) return;
     if (isSupabaseConfigured && supabase) {
       try {
-        await supabase.from('stories').delete().eq('user_id', currentUser.id);
-        await supabase.from('highlights').delete().eq('user_id', currentUser.id);
-        await supabase.from('profiles').delete().eq('id', currentUser.id);
+        const uid = currentUser.id;
+
+        // 1. Stories & Highlights
+        await supabase.from('stories').delete().eq('user_id', uid);
+        await supabase.from('highlights').delete().eq('user_id', uid);
+        await supabase.from('story_highlights').delete().eq('user_id', uid);
+
+        // 2. Relationships & Follow Requests
+        await supabase.from('relationships').delete().eq('follower_id', uid);
+        await supabase.from('relationships').delete().eq('target_id', uid);
+        await supabase.from('follows').delete().eq('follower_id', uid);
+        await supabase.from('follows').delete().eq('following_id', uid);
+        await supabase.from('follow_requests').delete().eq('requester_id', uid);
+        await supabase.from('follow_requests').delete().eq('target_id', uid);
+
+        // 3. Notifications & Streaks
+        await supabase.from('notifications').delete().eq('recipient_id', uid);
+        await supabase.from('notifications').delete().eq('actor_id', uid);
+        await supabase.from('notifications').delete().eq('user_id', uid);
+        await supabase.from('streaks').delete().eq('user_id', uid);
+        await supabase.from('streaks').delete().eq('partner_id', uid);
+
+        // 4. Calls & Messages
+        await supabase.from('call_history').delete().eq('caller_id', uid);
+        await supabase.from('call_history').delete().eq('receiver_id', uid);
+        await supabase.from('messages').delete().eq('sender_id', uid);
+        await supabase.from('messages').delete().eq('receiver_id', uid);
+
+        // 5. Chat Rooms
+        await supabase.from('chat_rooms').delete().eq('creator_id', uid);
+        await supabase.from('chat_rooms').delete().contains('members', [uid]);
+
+        // 6. Live Streams
+        await supabase.from('live_streams').delete().eq('host_id', uid);
+
+        // 7. Profile
+        await supabase.from('profiles').delete().eq('id', uid);
+
+        // 8. Auth signout
         await supabase.auth.signOut();
       } catch (err) {
         console.error('[Account Deletion Error]:', err);
       }
     }
     setCurrentUser(null);
-    localStorage.removeItem('be_live_current_user');
-    localStorage.removeItem('google_signup_session');
+    setStories([]);
+    setHighlights([]);
+    setPosts([]);
     setGoogleSignupSession(null);
+    localStorage.clear();
     setActiveTab('profile');
+  };
+
+  const handleRecordStoryView = async (storyId: string, watchTimeSeconds: number) => {
+    if (!currentUser || !isSupabaseConfigured || !supabase) return;
+    try {
+      const { data: storyRow } = await supabase
+        .from('stories')
+        .select('viewers, viewer_details')
+        .eq('id', storyId)
+        .maybeSingle();
+
+      if (storyRow) {
+        const existingViewers: string[] = storyRow.viewers || [];
+        const updatedViewers = existingViewers.includes(currentUser.id)
+          ? existingViewers
+          : [...existingViewers, currentUser.id];
+
+        const existingDetails: Record<string, any> = storyRow.viewer_details || {};
+        const prevViewer = existingDetails[currentUser.id] || {
+          userId: currentUser.id,
+          username: currentUser.username,
+          name: currentUser.name,
+          avatar: currentUser.avatar,
+          viewCount: 0,
+          timeSpentSeconds: 0,
+          lastViewedAt: new Date().toISOString()
+        };
+
+        const updatedDetail = {
+          ...prevViewer,
+          name: currentUser.name,
+          avatar: currentUser.avatar,
+          viewCount: (prevViewer.viewCount || 0) + 1,
+          timeSpentSeconds: (prevViewer.timeSpentSeconds || 0) + watchTimeSeconds,
+          lastViewedAt: new Date().toISOString()
+        };
+
+        const updatedDetailsMap = {
+          ...existingDetails,
+          [currentUser.id]: updatedDetail
+        };
+
+        await supabase
+          .from('stories')
+          .update({
+            viewers: updatedViewers,
+            viewer_details: updatedDetailsMap
+          })
+          .eq('id', storyId);
+
+        setStories(prev => prev.map(s => {
+          if (s.id === storyId) {
+            return {
+              ...s,
+              viewers: updatedViewers,
+              viewerDetails: updatedDetailsMap
+            };
+          }
+          return s;
+        }));
+      }
+    } catch (err) {
+      console.error('[handleRecordStoryView Error]:', err);
+    }
   };
 
   // ProfileScreen Handlers
   const handleAddHighlight = async (title: string, coverUrl: string, storyIds: string[]) => {
     if (!currentUser) return;
     const tempId = `highlight_${Date.now()}`;
+    const selectedStoryItems = stories.filter(s => storyIds.includes(s.id));
     const newHighlight: Highlight = {
       id: tempId,
       userId: currentUser.id,
       title,
       coverUrl,
       storyIds,
+      items: selectedStoryItems,
       createdAt: 'Just now'
     };
     setHighlights(prev => [newHighlight, ...prev]);
@@ -384,7 +490,8 @@ export default function App() {
             user_id: currentUser.id,
             title,
             cover_url: coverUrl,
-            story_ids: storyIds
+            story_ids: storyIds,
+            items: selectedStoryItems
           })
           .select()
           .single();
@@ -694,6 +801,7 @@ export default function App() {
                 onLogout={handleLogout}
                 onDeleteAccount={handleDeleteAccount}
                 onOpenMessages={handleOpenDM}
+                onRecordStoryView={handleRecordStoryView}
               />
             )}
 

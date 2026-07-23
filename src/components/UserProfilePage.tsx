@@ -14,6 +14,12 @@ import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 import { User } from '../types';
 import FollowersListModal from './FollowersListModal';
 
+import { ActiveStoryViewerModal } from './stories/ActiveStoryViewerModal';
+import { StoriesAndHighlightsView } from './stories/StoriesAndHighlightsView';
+import { StoryViewerModal } from './stories/StoryViewerModal';
+import { Play } from 'lucide-react';
+import { Story, Highlight } from '../types';
+
 interface ProfileData {
   id: string;
   username: string;
@@ -55,6 +61,12 @@ export default function UserProfilePage({
 
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
+  const [userStories, setUserStories] = useState<Story[]>([]);
+  const [userHighlights, setUserHighlights] = useState<Highlight[]>([]);
+  const [activeHighlight, setActiveHighlight] = useState<Highlight | null>(null);
+  const [activeStoryIndex, setActiveStoryIndex] = useState(0);
+  const [storyProgress, setStoryProgress] = useState(0);
+  const [showActiveStoriesModal, setShowActiveStoriesModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [loadingFollow, setLoadingFollow] = useState(false);
@@ -83,6 +95,46 @@ export default function UserProfilePage({
         .eq('id', p.id)
         .maybeSingle();
 
+      // Fetch user active stories
+      const { data: storiesData } = await supabase
+        .from('stories')
+        .select('*, profiles(username, avatar)')
+        .eq('user_id', p.id)
+        .order('created_at', { ascending: false });
+
+      if (storiesData) {
+        setUserStories(storiesData.map((s: any) => ({
+          id: s.id,
+          userId: s.user_id,
+          username: s.profiles?.username || p.username,
+          userAvatar: s.profiles?.avatar || p.avatar,
+          mediaUrl: s.media_url,
+          mediaType: s.media_type,
+          caption: s.caption || '',
+          createdAt: s.created_at,
+          viewers: s.viewers || [],
+          viewerDetails: s.viewer_details || {},
+        })));
+      }
+
+      // Fetch user highlights
+      const { data: highlightsData } = await supabase
+        .from('story_highlights')
+        .select('*')
+        .eq('user_id', p.id);
+
+      if (highlightsData) {
+        setUserHighlights(highlightsData.map((h: any) => ({
+          id: h.id,
+          userId: h.user_id,
+          title: h.title,
+          coverUrl: h.cover_url || '',
+          storyIds: h.story_ids || [],
+          items: h.items || [],
+          createdAt: new Date(h.created_at).toLocaleDateString(),
+        })));
+      }
+
       setProfile({
         id: p.id,
         username: p.username,
@@ -96,7 +148,6 @@ export default function UserProfilePage({
       });
 
       setPosts([]);
-
       setLoading(false);
     };
     load();
@@ -170,13 +221,30 @@ export default function UserProfilePage({
         {/* Profile header */}
         <div className="flex items-start gap-5 mb-6">
           {/* Avatar */}
-          <div className="relative shrink-0">
+          <div 
+            onClick={() => {
+              if (userStories.length > 0) {
+                setShowActiveStoriesModal(true);
+              }
+            }}
+            className={`relative shrink-0 ${userStories.length > 0 ? 'cursor-pointer hover:scale-105 transition-transform' : ''}`}
+            title={userStories.length > 0 ? "Click to view active stories" : ""}
+          >
             <img
               src={profile.avatar || `https://api.dicebear.com/7.x/adventurer/svg?seed=${profile.username}`}
               alt={profile.username}
-              className="w-20 h-20 rounded-full object-cover border-2 border-stone-800"
+              className={`w-20 h-20 rounded-full object-cover border-2 ${
+                userStories.length > 0
+                  ? 'border-amber-400 p-0.5 bg-gradient-to-tr from-[#C4B99D] via-pink-500 to-amber-400 ring-4 ring-amber-400/30'
+                  : 'border-stone-800'
+              }`}
               onError={e => { (e.target as HTMLImageElement).src = `https://api.dicebear.com/7.x/adventurer/svg?seed=${profile.username}`; }}
             />
+            {userStories.length > 0 && (
+              <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 bg-[#C4B99D] text-stone-950 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider shadow-md flex items-center gap-1 border border-stone-900">
+                <Play className="w-2 h-2 fill-current" /> Story
+              </div>
+            )}
           </div>
 
           {/* Stats row */}
@@ -256,11 +324,21 @@ export default function UserProfilePage({
             <p className="text-stone-500 text-sm mt-1">Follow to see their stories & highlights</p>
           </div>
         ) : (
-          <>
-          <div className="border-t border-stone-800 pt-8 pb-12 flex flex-col items-center justify-center text-center">
-            <p className="text-stone-500 font-bold text-sm">Stories & Highlights will appear here</p>
-          </div>
-          </>
+          <StoriesAndHighlightsView
+            isOwnProfile={isSelf}
+            userStories={userStories}
+            userHighlights={userHighlights}
+            isUploadingStory={false}
+            storyFileInputRef={{ current: null }}
+            onStoryUpload={() => {}}
+            onOpenCreateHighlight={() => {}}
+            onSelectHighlight={(hl) => {
+              setActiveHighlight(hl);
+              setActiveStoryIndex(0);
+              setStoryProgress(0);
+            }}
+            onOpenActiveStories={() => setShowActiveStoriesModal(true)}
+          />
         )}
       </div>
 
@@ -274,6 +352,93 @@ export default function UserProfilePage({
           onFollow={onFollow}
           onUnfollow={onUnfollow}
           onClose={() => setFollowersModal(null)}
+        />
+      )}
+
+      {/* Active Story Viewer Modal */}
+      {currentUser && (
+        <ActiveStoryViewerModal
+          isOpen={showActiveStoriesModal}
+          stories={userStories}
+          currentUser={currentUser}
+          onClose={() => setShowActiveStoriesModal(false)}
+          onRecordStoryView={async (storyId, watchTimeSeconds) => {
+            if (!currentUser || !isSupabaseConfigured || !supabase) return;
+            try {
+              const { data: storyRow } = await supabase
+                .from('stories')
+                .select('viewers, viewer_details')
+                .eq('id', storyId)
+                .maybeSingle();
+
+              if (storyRow) {
+                const existingViewers: string[] = storyRow.viewers || [];
+                const updatedViewers = existingViewers.includes(currentUser.id)
+                  ? existingViewers
+                  : [...existingViewers, currentUser.id];
+
+                const existingDetails: Record<string, any> = storyRow.viewer_details || {};
+                const prevViewer = existingDetails[currentUser.id] || {
+                  userId: currentUser.id,
+                  username: currentUser.username,
+                  name: currentUser.name,
+                  avatar: currentUser.avatar,
+                  viewCount: 0,
+                  timeSpentSeconds: 0,
+                  lastViewedAt: new Date().toISOString()
+                };
+
+                const updatedDetail = {
+                  ...prevViewer,
+                  name: currentUser.name,
+                  avatar: currentUser.avatar,
+                  viewCount: (prevViewer.viewCount || 0) + 1,
+                  timeSpentSeconds: (prevViewer.timeSpentSeconds || 0) + watchTimeSeconds,
+                  lastViewedAt: new Date().toISOString()
+                };
+
+                const updatedDetailsMap = {
+                  ...existingDetails,
+                  [currentUser.id]: updatedDetail
+                };
+
+                await supabase
+                  .from('stories')
+                  .update({
+                    viewers: updatedViewers,
+                    viewer_details: updatedDetailsMap
+                  })
+                  .eq('id', storyId);
+
+                setUserStories(prev => prev.map(s => {
+                  if (s.id === storyId) {
+                    return {
+                      ...s,
+                      viewers: updatedViewers,
+                      viewerDetails: updatedDetailsMap
+                    };
+                  }
+                  return s;
+                }));
+              }
+            } catch (err) {
+              console.error(err);
+            }
+          }}
+        />
+      )}
+
+      {/* Highlight Story Viewer Modal */}
+      {activeHighlight && profile && (
+        <StoryViewerModal
+          activeHighlight={activeHighlight}
+          activeStoryIndex={activeStoryIndex}
+          storyProgress={storyProgress}
+          stories={userStories}
+          user={currentUser || ({ id: profile.id, username: profile.username, name: profile.name, avatar: profile.avatar } as any)}
+          onClose={() => setActiveHighlight(null)}
+          onPrevStory={() => setActiveStoryIndex(prev => Math.max(0, prev - 1))}
+          onNextStory={() => setActiveStoryIndex(prev => prev < activeHighlight.storyIds.length - 1 ? prev + 1 : 0)}
         />
       )}
     </div>

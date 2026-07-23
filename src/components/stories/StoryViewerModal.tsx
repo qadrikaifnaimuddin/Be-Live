@@ -27,7 +27,9 @@ export const StoryViewerModal: React.FC<StoryViewerModalProps> = ({
 }) => {
   if (!activeHighlight) return null;
 
-  const currentStory = stories.find((s) => s.id === activeHighlight.storyIds[activeStoryIndex]);
+  const targetStoryId = activeHighlight.storyIds[activeStoryIndex];
+  const currentStory = (activeHighlight.items && activeHighlight.items[activeStoryIndex]) ||
+    stories.find((s) => s.id === targetStoryId);
 
   return (
     <AnimatePresence>

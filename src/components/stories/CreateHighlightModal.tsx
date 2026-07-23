@@ -82,11 +82,18 @@ export const CreateHighlightModal: React.FC<CreateHighlightModalProps> = ({
                       }`}
                     >
                       <div className="flex items-center gap-3">
-                        <img
-                          src={story.mediaUrl}
-                          alt="Story thumbnail"
-                          className="w-10 h-10 rounded-lg object-cover bg-stone-800"
-                        />
+                        {story.mediaType === 'video' ? (
+                          <video
+                            src={story.mediaUrl}
+                            className="w-10 h-10 rounded-lg object-cover bg-stone-800"
+                          />
+                        ) : (
+                          <img
+                            src={story.mediaUrl}
+                            alt="Story thumbnail"
+                            className="w-10 h-10 rounded-lg object-cover bg-stone-800"
+                          />
+                        )}
                         <div>
                           <p className="text-xs font-bold text-stone-200">
                             Story from {new Date(story.createdAt).toLocaleDateString()}

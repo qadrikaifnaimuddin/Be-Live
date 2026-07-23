@@ -232,7 +232,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
           {forgotStep === 'request' && (
             <form onSubmit={handleForgotPasswordRequest} className="space-y-4">
               <p className="text-xs text-stone-400 leading-relaxed">
-                Enter your username or email address below. We will transmit a 6-digit security code to your registered email.
+                Enter your username or email address below. We will transmit a security verification code to your registered email.
               </p>
               <div>
                 <label className="block text-xs font-bold text-stone-400 mb-1.5 uppercase tracking-wider">
@@ -273,7 +273,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
           {forgotStep === 'verify' && (
             <form onSubmit={handleForgotPasswordVerify} className="space-y-4">
               <p className="text-xs text-stone-400 leading-relaxed">
-                We sent a 6-digit security code to <strong className="text-stone-200">{forgotResetEmail}</strong>.
+                We sent a security verification code to <strong className="text-stone-200">{forgotResetEmail}</strong>.
               </p>
               <div>
                 <label className="block text-xs font-bold text-stone-400 mb-1.5 uppercase tracking-wider">
@@ -282,7 +282,6 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                 <input
                   type="text"
                   required
-                  maxLength={6}
                   value={forgotOtpToken}
                   onChange={(e) => setForgotOtpToken(e.target.value)}
                   className="w-full bg-transparent border border-stone-700/80 hover:border-stone-500 focus:border-purple-500 rounded-xl px-4 py-3 text-center text-lg font-mono text-stone-100 tracking-widest focus:outline-none transition-colors"

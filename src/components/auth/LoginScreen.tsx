@@ -75,33 +75,23 @@ export default function LoginScreen({
               </h1>
             </div>
           </div>
-
-          {/* Subtitle Section at Bottom Left */}
-          <div className="space-y-2 max-w-sm">
-            <h3 className="text-sm font-serif tracking-[0.25em] text-[#C4B99D] uppercase font-bold">
-              ENTER THE LOUNGE
-            </h3>
-            <p className="text-xs text-stone-400 font-light leading-relaxed">
-              Interact with the geometric digital twin nodes. Move your cursor to rotate and distort the structure.
-            </p>
-          </div>
         </div>
 
         {/* RIGHT COLUMN: Auth Form & Floating Feature Badges */}
         <div className="relative w-full max-w-md mx-auto">
           
           {/* Top-Left Glowing Camera Badge */}
-          <div className="absolute -top-7 -left-5 p-3.5 rounded-2xl border border-rose-500/50 bg-rose-950/20 text-rose-400 shadow-lg shadow-rose-500/20 backdrop-blur-md hidden sm:flex items-center justify-center z-20">
+          <div className="absolute -top-16 -left-14 p-3.5 rounded-2xl border border-rose-500/50 bg-rose-950/20 text-rose-400 shadow-lg shadow-rose-500/20 backdrop-blur-md hidden sm:flex items-center justify-center z-20">
             <Camera className="w-5 h-5" />
           </div>
 
           {/* Center-Right Glowing Palette Badge */}
-          <div className="absolute top-1/2 -right-7 -translate-y-1/2 p-3.5 rounded-2xl border border-amber-500/50 bg-amber-950/20 text-amber-400 shadow-lg shadow-amber-500/20 backdrop-blur-md hidden sm:flex items-center justify-center z-20">
+          <div className="absolute top-1/2 -right-16 -translate-y-1/2 p-3.5 rounded-2xl border border-amber-500/50 bg-amber-950/20 text-amber-400 shadow-lg shadow-amber-500/20 backdrop-blur-md hidden sm:flex items-center justify-center z-20">
             <Palette className="w-5 h-5" />
           </div>
 
           {/* Bottom-Right Glowing Microphone Badge */}
-          <div className="absolute -bottom-6 -right-5 p-3.5 rounded-2xl border border-cyan-500/50 bg-cyan-950/20 text-cyan-400 shadow-lg shadow-cyan-500/20 backdrop-blur-md hidden sm:flex items-center justify-center z-20">
+          <div className="absolute -bottom-12 -right-14 p-3.5 rounded-2xl border border-cyan-500/50 bg-cyan-950/20 text-cyan-400 shadow-lg shadow-cyan-500/20 backdrop-blur-md hidden sm:flex items-center justify-center z-20">
             <Mic className="w-5 h-5" />
           </div>
 

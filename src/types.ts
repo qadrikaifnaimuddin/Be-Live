@@ -193,6 +193,7 @@ export interface Highlight {
   title: string;
   coverUrl: string;
   storyIds: string[]; // List of story IDs in this highlight
+  items?: Story[]; // Full story snapshots for perpetual playback
   createdAt: string;
 }
 
